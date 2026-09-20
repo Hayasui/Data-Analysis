@@ -1,0 +1,631 @@
+# -*- coding: utf-8 -*-
+"""日本 MMORPG 玩家定量调研 —— 投后数据集清洗（脚本 092601）
+
+把一份平台导出的原始数据收成一个开箱即用的分析文件。三件事顺序做完：
+
+  第一段  按问卷流向逐题切分。先算「谁该答这道题」，再决定这格保留、作废还是写缺失码。
+          方向只有一个：用前面的答案决定后面那道题作不作数，不拿后题反推前题。
+  第二段  加受访者键、补掉所有空白、删掉不该随数据发布的列。
+  第三段  文本型分类变量编成数字，缺失码按 UKDS 的口径按原因拆开。
+
+输入  data/Original.csv    600 行 × 438 列，前两行都是表头（第一行变量名，第二行题目与选项正文）
+输出  data/RPG.csv         600 行 × 426 列
+      data/值码表.csv       文本型分类变量的码表（与《变量映射底稿.xlsx》的「值码表」同源）
+      data/各题分母.csv     逐题清洗后的有效 N、MMORPG 人数、三种缺失码的格数
+      data/清洗日志.txt     每一步动了什么、动了多少格
+
+用法  python 092601_cleaning.py                    默认读 data/Original.csv，写 data/
+      python 092601_cleaning.py 原始.csv 输出.csv   换路径
+      python 092601_cleaning.py --check            只重算并与现有输出逐格比对，不写盘
+
+口径与逐题理由见 README.md；本文件只做实现。脚本可重跑，跑几次结果都一样。
+"""
+import csv
+import io
+import os
+import sys
+import collections
+
+# =============================================================== 0 缺失码与路径
+# UKDS 把「不适用」按原因分开：not applicable / not provided / not recorded。
+# 本项目据此把缺失拆成三个码，95（error）与 96（not known）本卷不用。
+NA_SKIP = "97"      # 跳转未出示，以及清洗时事后作废的作答
+NA_REFUSE = "98"    # 明确表示不愿回答／不便回答
+NA_NOREC = "99"     # 无可用记录：整题无数据、开放题没写、性别落不进二值
+NA_ALL = (NA_SKIP, NA_REFUSE, NA_NOREC)
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+CHECK_ONLY = "--check" in sys.argv
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+SRC = ARGS[0] if ARGS else os.path.join(HERE, "data", "Original.csv")
+DST = ARGS[1] if len(ARGS) > 1 else os.path.join(HERE, "data", "RPG.csv")
+OUTDIR = os.path.dirname(os.path.abspath(DST))
+CODES_OUT = os.path.join(OUTDIR, "值码表.csv")
+DEN_OUT = os.path.join(OUTDIR, "各题分母.csv")
+LOG_OUT = os.path.join(OUTDIR, "清洗日志.txt")
+
+
+# 问卷变量区：只有这一区里的缺失才用 97／98／99。ID 与 iirepSerial 里的 97／98／99
+# 是真实取值（ID=97 的那一行、序列号里带 98 的受访者），动不得。
+def is_survey(h):
+    return h.startswith("SCREENER") or h.startswith("IDP")
+
+
+# =============================================================== 1 读入
+with io.open(SRC, encoding="utf-8-sig", newline="") as fh:
+    rd = csv.reader(fh)
+    NAMES = next(rd)              # 第一行：变量名
+    next(rd)                      # 第二行：题目与选项正文，不是数据
+    RAW = [list(r) for r in rd]   # 第三行起才是受访者
+N = len(RAW)
+RAW_IDX = {h: i for i, h in enumerate(NAMES)}
+
+# 工作副本。第四段删完列之后，CUR_ROWS／CUR_IDX 指向收窄后的表，后面的自检都读它。
+WORK = [list(r) + [""] * (len(NAMES) - len(r)) for r in RAW]
+CUR_ROWS = WORK
+CUR_IDX = RAW_IDX
+
+LOG = []
+
+
+def say(s=""):
+    LOG.append(s)
+
+
+def section(title):
+    say("")
+    say("=" * 72)
+    say(title)
+    say("=" * 72)
+
+
+def GV(h, k):
+    """某人在某列上的现值。"""
+    return CUR_ROWS[k][CUR_IDX[h]]
+
+
+def PUT(h, k, v):
+    CUR_ROWS[k][CUR_IDX[h]] = v
+
+
+def y_raw(h):
+    """从原始数据里取勾了 Yes 的人。所有判定都基于原始作答，不看中间状态。"""
+    i = RAW_IDX[h]
+    return {k for k, row in enumerate(RAW) if row[i] == "Yes"}
+
+
+def filled_raw(h):
+    """从原始数据里取非空的人。"""
+    i = RAW_IDX[h]
+    return {k for k, row in enumerate(RAW) if row[i] != ""}
+
+
+def valid(h):
+    """清洗后某列的有效人数（不含 97／98／99，也不含空）。"""
+    return {k for k in range(N) if GV(h, k) not in NA_ALL and GV(h, k) != ""}
+
+
+def n_of(h, code):
+    return sum(1 for k in range(N) if GV(h, k) == code)
+
+
+def pick(prefix):
+    """取某个变量名下面的全部列：主列、__n 选项列、_IDPAxxx 开放伴随列，按原表列序。"""
+    cols = [h for h in NAMES
+            if h == prefix or h.startswith(prefix + "__") or h.startswith(prefix + "_IDPA")]
+    extra = {"SCREENER1": "SCREENER1_12", "SCREENER2": "SCREENER2_10",
+             "SCREENER3": "SCREENER3_5"}.get(prefix)
+    if extra and extra in RAW_IDX:
+        cols.append(extra)
+    order = {h: i for i, h in enumerate(NAMES)}
+    return sorted(set(cols), key=lambda h: order[h])
+
+
+# 开放题与整题无数据的列：空白写 99（无文本），不写 97。
+# 开放题的 99 是「出示了但没写」，与「跳转没出示」不是一回事。
+OPEN_TEXT = ["SCREENER1_12", "SCREENER2_10", "SCREENER3_5", "IDP37",
+             "IDP43_IDPA390", "IDP44_IDPA399", "IDP46_IDPA422", "IDP47_IDPA432",
+             "IDP48_IDPA605", "IDP49_IDPA441", "IDP57_IDPA492", "IDP58_IDPA506",
+             "IDP59_IDPA513", "IDP62_IDPA543", "IDP64_IDPA552", "IDP65_IDPA560",
+             "IDP67_IDPA575"]
+COL_NOTEXT = set(OPEN_TEXT) | {"IDP45_IDPA413", "IDP60_IDPA522", "IDP45", "IDP60"}
+
+# ⚠️ 一处待裁决，2026-09-20。
+# Q9 至 Q12 那 2 名异常人在 Q9 的开放填空（IDP37）上的作答被作废，按本项目的分码口径
+# 应记 97「作废的作答」。现有 RPG.csv 里这两格是 99：当年先用 99 做单一占位码，
+# 拆码时把开放列整列保留成 99，漏掉了这两格。脚本默认照现有文件写 99，好让第三方逐格复现；
+# 若裁决改成 97，把下面这个开关置 True、重跑脚本、重出码本即可（只动这 2 格）。
+VOID_OPEN_TEXT_AS_97 = False
+
+# 待删的 16 列：整列常数、重复变量、平台不该有的选项列。
+DROP = (["BlocksOrder", "iirepEveryone", "resp_gender", "language",
+         "respondent_gender_recoded", "age_group",
+         "IDP51__18", "IDP53__18"]
+        + ["IDP54/L486__%d" % s for s in range(1, 9)])
+
+# Q22 矩阵：18 个行标记配 18 个评分块，每块 8 条说法。第 18 行是平台自己加的，稍后整块删掉。
+Q22_FLAG = ["IDP53__%d" % g for g in range(1, 19)]
+Q22_RATE = ["IDP54/L%d__%d" % (468 + g, s) for g in range(1, 19) for s in range(1, 9)]
+Q22_ROW18 = ["IDP53__18"] + ["IDP54/L486__%d" % s for s in range(1, 9)]
+
+
+def fill_blanks(cols):
+    """这一组列里的空白一律写缺失码：开放题与整题无数据的列写 99，其余写 97。"""
+    n = collections.Counter()
+    for h in cols:
+        code = NA_NOREC if h in COL_NOTEXT else NA_SKIP
+        for k in range(N):
+            if GV(h, k) == "":
+                PUT(h, k, code)
+                n[code] += 1
+    return n
+
+
+def void(cols, people):
+    """作废：这批人在这些列上的作答抹掉，写成 97。
+    返回「原有作答被抹掉的格数」与「本来就是空的格数」，好让日志说实话。"""
+    had = blank = 0
+    for h in cols:
+        for k in people:
+            v = GV(h, k)
+            if v == NA_SKIP:
+                continue
+            if v == "":
+                blank += 1
+            else:
+                had += 1
+            PUT(h, k, NA_SKIP)
+    return had, blank
+
+
+# =============================================================== 2 事前事实
+section("一、清洗前算好的原始事实")
+S1_RPG = y_raw("SCREENER1__1")
+S1_MMO = y_raw("SCREENER1__2")
+S2_MMO = y_raw("SCREENER2__1")
+IS_MMO = S1_MMO | S2_MMO                      # 并集：S1 或 S2 任一处勾了 MMORPG 都算
+Q2_ESC = y_raw("IDP30__19")                   # Q2 选「以上都没听过」
+Q3_ESC = y_raw("IDP50__18")                   # Q3 选「一款都没玩过」
+Q4_GAME = ["IDP51__%d" % j for j in range(1, 18)]
+BRANCH_DUP = filled_raw("IDP52") & filled_raw("IDP37")   # 主支与支线都答了的异常人
+
+say("样本 %d 人 × %d 列（原始表）。文件里只有完成的访谈，被终止的人不在其中，" % (N, len(NAMES)))
+say("所以 %d 人本身就是「S1 勾了 RPG 或 MMORPG」的合格样本，样本口径不需要裁切。" % N)
+say("S1 勾 RPG = %d；S1 勾 MMORPG = %d；S2 补进 MMORPG = %d；并集 is_mmorpg=1 共 %d 人。"
+    % (len(S1_RPG), len(S1_MMO), len(S2_MMO), len(IS_MMO)))
+say("Q2 逃亡口 = %d 人；Q3 逃亡口 = %d 人。" % (len(Q2_ESC), len(Q3_ESC)))
+say("主支与支线都答了的异常人 = %d 人（数据行 %s）。"
+    % (len(BRANCH_DUP), "、".join(str(k + 1) for k in sorted(BRANCH_DUP))))
+
+# =============================================================== 3 逐题切分
+# 顺序与问卷流向一致：S1 → S2 → S3 → Q2 → Q3 → Q4 → 两支 → Q13…Q37。
+section("二、按问卷流向逐题切分（补缺失码与作废作答）")
+say("")
+say("S1 游戏类型：全卷作答，无空值。勾 RPG 或 MMORPG 者进入正式样本，无子样本可裁。")
+
+c = fill_blanks(pick("SCREENER2"))
+say("")
+say("S2 RPG 细分：只对 S1 勾了 RPG 的 %d 人出示，另 %d 人在本题写 97（%d 格）。"
+    % (len(S1_RPG), N - len(S1_RPG), sum(c.values())))
+
+say("")
+say("S3 设备：全卷作答，无空值。")
+
+say("")
+say("Q2 听说过哪些 MMORPG：全卷作答，无空值。选「以上都没听过」的 %d 人跳过 Q3。" % len(Q2_ESC))
+
+c = fill_blanks(pick("IDP50"))
+say("")
+say("Q3 玩过哪些 MMORPG：Q2 逃亡口的 %d 人写 97（%d 格）。" % (len(Q2_ESC), sum(c.values())))
+say("IDP50__18（一款都没玩过）= %d 人，是有效作答，保留。" % len(Q3_ESC))
+say("★ 平台侧失误：这 %d 人本应直接跳到 Q9，实投被继续问了 Q4，也被带进了 Q22。" % len(Q3_ESC))
+
+Q4_COLS = pick("IDP51")
+c = fill_blanks(Q4_COLS)
+n4_had, n4_blank = void(Q4_COLS, Q3_ESC)
+say("")
+say("Q4 还在玩的有哪些：第一层，Q2 逃亡口的 %d 人写 97（%d 格）；" % (len(Q2_ESC), sum(c.values())))
+say("第二层，Q3 逃亡口的 %d 人在本题的作答全部作废，原有作答 %d 格，另有 %d 格本来就是空的。"
+    % (len(Q3_ESC), n4_had, n4_blank))
+say("作废的理由：本题的选项集由 Q3 的勾选生成，Q3 说「一款都没玩过」的人没有任何可出示的")
+say("游戏，本题对他们不成立。处理方式是作废作答而不是剔除样本——这 %d 人在 Q3 与 Q9 及之后" % len(Q3_ESC))
+say("的题目上都有有效作答，删人会连带毁掉支线与后段各题的分母。")
+say("清洗后本题有效 = %d 人。IDP51__18 是平台串过来的 Q3 文本，已整项作废，第四段删列。"
+    % len(valid("IDP51__1")))
+Q4_PICK = {k for k in range(N) if any(GV(h, k) in ("Yes", "1") for h in Q4_GAME)}
+say("本题勾到至少一款游戏、继续走 Q5 至 Q8 的有 %d 人。" % len(Q4_PICK))
+
+c = fill_blanks(pick("IDP52") + pick("IDP34") + pick("IDP35") + pick("IDP36"))
+say("")
+say("Q5 至 Q8 自报主玩的那一款（是哪一款、玩多久、每天多久、月消费）：")
+say("Q4 没勾到游戏的 %d 人写 97（%d 格）。这一段跳转本来就对，清洗只补空白。"
+    % (N - len(Q4_PICK), sum(c.values())))
+
+Q9_COLS = pick("IDP37") + pick("IDP38") + pick("IDP39") + pick("IDP40")
+c = fill_blanks(Q9_COLS)
+n9_had, n9_blank = void(Q9_COLS, BRANCH_DUP)
+if not VOID_OPEN_TEXT_AS_97:
+    for k in BRANCH_DUP:
+        if GV("IDP37", k) != NA_NOREC:
+            PUT("IDP37", k, NA_NOREC)
+say("")
+say("Q9 至 Q12 平行支线（笼统最常玩的那一款）：空白写缺失码（%d 格）；" % sum(c.values()))
+say("那 %d 名异常人在本支线的作答作废，原有作答 %d 格（另有 %d 格本来就是空的），"
+    % (len(BRANCH_DUP), n9_had, n9_blank))
+say("按问卷流向他们只该走主支。")
+if not VOID_OPEN_TEXT_AS_97:
+    say("★ 其中 Q9 的开放填空（IDP37）两格写的是 99 而不是 97，照现有 RPG.csv 保留，"
+        "见文件头的开关说明。")
+say("两支恰好覆盖 %d 人：主支 %d ＋ 支线 %d。" % (N, len(valid("IDP52")), len(valid("IDP37"))))
+
+c = fill_blanks(pick("IDP41") + pick("IDP42") + pick("IDP43") + pick("IDP44"))
+say("")
+say("Q13 至 Q16 RO 认知与新作意愿：全卷适用，空白写缺失码（%d 格）。" % sum(c.values()))
+say("Q15 与 Q16 互斥：Q14 选不想体验的 %d 人答 Q15，选想体验的 %d 人答 Q16，"
+    % (len(valid("IDP43__1")), len(valid("IDP44__1"))))
+say("选「一般」的 %d 人两题都不答。"
+    % (len(valid("IDP42")) - len(valid("IDP43__1")) - len(valid("IDP44__1"))))
+
+say("")
+say("Q17 看重因素：★ 投放时本题没有出出来，数据集里连选项列都没有，两列全空，写 99。")
+say("这里的 99 是「整题无数据」，与跳转不适用不是一回事，报告里要单独说明。")
+say("（这四列由第二段末尾的兜底扫描补上，那里会把格数一并报出来。）")
+
+for p in ("IDP46", "IDP47", "IDP48"):
+    fill_blanks(pick(p))
+say("")
+say("Q18 至 Q20 卖点、痛点、流失原因：全卷适用，空白写缺失码。")
+say("★ 这三题设计上只对 MMORPG 玩家出示，实投是全卷 %d 人作答，门槛没落位。" % N)
+say("数据原样保留，不写 97；分析时统一用 is_mmorpg 筛出 %d 人，全卷口径只作附录对照。" % len(IS_MMO))
+say("Q20 另有分流：选「还没引退过」的 %d 人不答 Q21。" % (N - len(valid("IDP49__1"))))
+
+c = fill_blanks(pick("IDP49"))
+say("")
+say("Q21 回流吸引点：Q20 选「一直在玩」的 %d 人写 97（%d 格）。"
+    % (N - len(valid("IDP49__1")), sum(c.values())))
+
+n1_had, n1_blank = void(Q22_FLAG + Q22_RATE, Q3_ESC)
+n2_had, n2_blank = void(Q22_ROW18, set(range(N)))
+c = fill_blanks(Q22_FLAG + Q22_RATE)
+say("")
+say("Q22 重点游戏形象的评分矩阵（%d 个行标记 ＋ %d 个评分格）：" % (len(Q22_FLAG), len(Q22_RATE)))
+say("第一层，Q3 逃亡口的 %d 人在本题的作答全部作废，原有作答 %d 格；"
+    % (len(Q3_ESC), n1_had))
+say("他们没有可出示的游戏行，本题对他们不成立。")
+say("第二层，平台自己加的第 18 行「一款都没玩过」整行作废，原有作答 %d 格，问卷里没有这一行。"
+    % n2_had)
+say("第三层，其余空白写缺失码（%d 格）。空白来自 Q2 逃亡口的 %d 人，" % (sum(c.values()), len(Q2_ESC)))
+say("以及各人没勾过的游戏行——评分列按人按行铺开，某人在某行没被出示就没有值。")
+say("清洗后本题有效 = %d 人，保留 17 款游戏。" % len(valid("IDP53__1")))
+say("★ 报告要注明：有 %d 名受访者在这 17 款游戏中一款都没有玩过。" % len(Q3_ESC))
+say("这个事实由 Q3 的 IDP50__18 承载，不依赖被作废的那一行。")
+
+SOLO = {k for k in range(N) if GV("IDP55", k).startswith("ソロ")}
+say("")
+say("Q23 社交形态：全卷适用。选「独狼」的 %d 人跳过 Q24 与 Q25。" % len(SOLO))
+c = fill_blanks(pick("IDP56") + pick("IDP57"))
+say("Q24 与 Q25：这 %d 人写 97（%d 格）。这两题的门槛落在 Q23 上，没有落在 MMORPG 上，"
+    % (len(SOLO), sum(c.values())))
+say("做 MMORPG 玩家分析时分母取 is_mmorpg=1 的 %d 人。" % len(valid("IDP56__1") & IS_MMO))
+for p in ("IDP58", "IDP59"):
+    fill_blanks(pick(p))
+say("Q26 付费动机、Q27 付费形式：实投全卷作答，门槛未落位，数据保留、分析时筛。")
+
+say("")
+say("Q28 游戏外社群：★ 与 Q17 同因，投放时没有出题，两列全空，写 99。")
+say("Q29 全游戏月消费：全卷适用，无空值。原 Q31 与原 Q34 已并成此题，累计金额不再采集。")
+
+for p in ("IDP62", "IDP64", "IDP65", "IDP66", "IDP67"):
+    fill_blanks(pick(p))
+say("")
+say("Q30 至 Q35 信息触达与背景信息：空白写缺失码。")
+say("Q31 关注 → Q32：%d 人关注，%d 人不关注、不答 Q32。" % (len(valid("IDP64__1")), N - len(valid("IDP64__1"))))
+say("Q36 职业、Q37 可支配金额：单选，无空值。")
+
+c = fill_blanks([h for h in NAMES if is_survey(h)])
+say("")
+say("兜底扫描：问卷变量区剩下的空白一并写缺失码（%d 格）。" % sum(c.values()))
+say("面板元数据列（QUOTAGERANGE／GENDER_NonBinary／JPSTDREGION／resp_gender）的空值不动——")
+say("它们的语义是「面板没给」或平台内部字段，与跳转不适用不是一回事。")
+
+# =============================================================== 4 数字化与新增列
+section("三、哑变量数字化、新增三个标记变量")
+dummy = 0
+for i, h in enumerate(NAMES):
+    vals = {row[i] for row in WORK}
+    if vals <= {"Yes", "No"} | set(NA_ALL) and (vals & {"Yes", "No"}):
+        dummy += 1
+        for k in range(N):
+            if WORK[k][i] == "Yes":
+                WORK[k][i] = "1"
+            elif WORK[k][i] == "No":
+                WORK[k][i] = "0"
+say("多选哑变量 Yes→1、No→0：共 %d 列。缺失码不动，所以每一列都是三态。" % dummy)
+
+for k in range(N):
+    WORK[k].append("1" if k in IS_MMO else "0")
+    WORK[k].append("1" if GV("IDP52", k) != NA_SKIP else "2")
+    WORK[k].append("1" if GV("IDP51__1", k) != NA_SKIP else "0")
+NEW = ["is_mmorpg", "branch", "elig_q4"]
+say("")
+say("新增三列，供分析直接引用，不占问卷题号：")
+say("  is_mmorpg  1 = S1 或 S2 勾了 MMORPG（%d 人）／0 = 都不是（%d 人）；Q17 至 Q27 用它做门槛"
+    % (len(IS_MMO), N - len(IS_MMO)))
+say("  branch     1 = 主支走 Q5 至 Q8（%d 人）／2 = 支线走 Q9 至 Q12（%d 人）"
+    % (len(valid("IDP52")), len(valid("IDP37"))))
+say("  elig_q4    1 = 该答 Q4 与 Q22（%d 人）／0 = 不该答（%d 人）；"
+    % (len(valid("IDP51__1")), N - len(valid("IDP51__1"))))
+say("             Q22 的分母是 is_mmorpg=1 且 elig_q4=1 的 %d 人。"
+    % len(valid("IDP53__1") & IS_MMO))
+
+# =============================================================== 5 加 ID、删列
+section("四、加受访者键、删掉不该随数据发布的列")
+HEAD = NAMES + NEW
+BODY = WORK
+
+if "ID" in HEAD:
+    say("已有 ID 列，跳过。")
+else:
+    HEAD = ["ID"] + HEAD
+    BODY = [[str(i + 1)] + r for i, r in enumerate(BODY)]
+    say("最前面加 ID 列：1 至 %d，等于文件内行序。" % N)
+    say("ID 用来 join 与按人聚类；平台序列号 iirepSerial 留着，用来向平台回溯。")
+
+missing = [h for h in DROP if h not in HEAD]
+keep = [i for i, h in enumerate(HEAD) if h not in set(DROP)]
+HEAD = [HEAD[i] for i in keep]
+BODY = [[r[i] for i in keep] for r in BODY]
+say("")
+say("删掉 %d 列，删后 %d 行 × %d 列。" % (len(DROP), len(BODY), len(HEAD)))
+say("  整列同一个值，或与别的列重复：BlocksOrder、iirepEveryone、resp_gender、language、")
+say("  respondent_gender_recoded（GENDER_NonBinary 的粗化派生）、age_group（与 QUOTAGERANGE 逐行相同）。")
+say("  平台自己多加、问卷里没有的选项列：IDP51__18（Q3 的文本串进了 Q4）、IDP53__18 与 L486 的 8 列")
+say("  （Q22 的第 18 行「一款都没玩过」）。这两处不是格子里的值错，是列或行本身不该存在。")
+say("iirepSerial 现在落在第 %d 列（删列前在第 %d 列）。"
+    % (HEAD.index("iirepSerial") + 1, NAMES.index("iirepSerial") + 1))
+
+# 收窄后的表接管全局访问器，后面的自检都读这一份
+CUR_ROWS = BODY
+CUR_IDX = {h: j for j, h in enumerate(HEAD)}
+P = CUR_IDX
+
+# =============================================================== 6 编数字码
+section("五、文本型分类变量编成数字")
+
+GAMES_Q2 = ["ファイナルファンタジーXIV", "BLUE PROTOCOL", "黒い砂漠 MOBILE", "リネージュM",
+            "リネージュ2M", "オーディン：ヴァルハラ・ライジング", "Ash Tale-風の大陸-",
+            "ツリーオブセイヴァー：ネバーランド", "杖と剣の伝説", "AZUREA-空の唄-",
+            "ディアブロ イモータル", "コード：ドラゴンブラッド", "二ノ国：Cross Worlds",
+            "ラグナロクオンライン", "ラグナロク マスターズ", "ラグナロクX", "ラグナロクオリジン"]
+DUR = ["3 个月以内", "3–6 个月", "6 个月–1 年", "1–3 年", "3–5 年", "5 年以上"]
+DUR2 = ["3ヶ月未満", "3～6ヶ月", "6ヶ月～1年", "1年～3年", "3年～5年", "5年以上"]
+HRS = ["30分未満", "30分～1時間", "1時間～2時間", "2時間～3時間", "3時間～5時間", "5時間以上"]
+PAY = ["課金はしていない", "1000円以内", "1000～3000円", "3000～5000円", "5000～1万円",
+       "1万～3万円", "3万～5万円", "5万円以上"]
+JOB = ["学生", "一般社員", "管理職", "公務員", "フリーランス", "自営業・経営者",
+       "専業主婦・主夫", "求職中・無職", "定年退職者", "その他（具体的にご記入ください）"]
+INC37 = ["ほとんどない", "5000円未満", "5000～1万円", "1万～3万円", "3万～5万円",
+         "5万～10万円", "10万円以上"]
+REGION = ["Hokkaido", "Tohoku", "Kanto", "Chubu", "Kansai", "Chugoku", "Shikoku",
+          "Kyushu / Okinawa"]
+REFUSE = {"回答したくない": NA_REFUSE}      # 付费与金额几题印的是这个说法
+GENDER_REFUSE = {"回答しない": NA_REFUSE}   # 性别那题印的是这个说法，两者不通假
+
+
+def seq(lst):
+    """按问卷选项顺序升序赋值：1 对应问卷里的选项 1。"""
+    return {v: str(i) for i, v in enumerate(lst, start=1)}
+
+
+# （变量，题号，测量层级，码映射，备注）。性别按分析侧的要求编成男性 0、女性 1，
+# 其余两项进缺失族：问卷 S4 只印了三项，「その他」是平台另加的类目。
+CODES = [
+    ("QUOTAGERANGE", "S5", "ordinal", seq(["18-29", "30-49", "50-60"]),
+     "面板配额变量，数据里只有三档；升序：1＝最年轻档"),
+    ("GENDER_NonBinary", "S4", "nominal",
+     dict({"男性": "0", "女性": "1", "その他": NA_NOREC}, **GENDER_REFUSE),
+     "男 0／女 1；「回答しない」＝98；平台另加的「その他」＝99"),
+    ("JPSTDREGION", "（面板）", "nominal", seq(REGION), "按日本标准地域顺序，北海道到九州"),
+    ("IDP52", "Q5", "nominal", seq(GAMES_Q2), "码序＝Q2 的 17 款游戏顺序"),
+    ("IDP34", "Q6", "ordinal", seq(DUR), "升序：1＝3 个月以内"),
+    ("IDP35", "Q7", "ordinal", seq(HRS), "升序：1＝30 分未满"),
+    ("IDP36", "Q8", "ordinal", dict(seq(PAY), **REFUSE), "升序；末项不便回答＝98"),
+    ("IDP38", "Q10", "ordinal", seq(DUR2), "升序：1＝3 个月未满"),
+    ("IDP39", "Q11", "ordinal", seq(HRS), "升序：1＝30 分未满"),
+    ("IDP40", "Q12", "ordinal", dict(seq(PAY), **REFUSE), "升序；末项不便回答＝98"),
+    ("IDP41", "Q13", "ordinal",
+     seq(["このIPがとても好きで、ROシリーズ作品をプレイしたことがある",
+          "ROシリーズ作品をプレイしたことはあるが、特に好きというわけではない",
+          "IPの名前を聞いたことはあるが、ゲーム内容についてはよく知らない",
+          "このIP自体を知らないし、ゲームについてもわからない"]),
+     "降序：1＝最喜欢且玩过，4＝完全不了解"),
+    ("IDP42", "Q14", "ordinal",
+     seq(["全くプレイしたくない", "プレイしたくない", "どちらとも言えない",
+          "ややプレイしてみたい", "ぜひプレイしてみたい"]),
+     "升序：1＝完全不想，5＝非常想"),
+    ("IDP55", "Q23", "nominal",
+     seq(["アクティブ型：自分から積極的に声をかけてパーティーを組んだり、ギルドイベントに参加する",
+          "パッシブ（聞き専）型：自分から積極的には動かないが、他人のチャットを眺めたり、パーティー参加時も基本的には無言でついていく",
+          "ソロプレイ型：基本的には誰ともコミュニケーションせず、ひとりでプレイする",
+          "状況による（ゲームの雰囲気、リアルタイムの余裕、友人がプレイしているか等によって変わる）"]),
+     "码序＝问卷顺序：主动／被动／独狼／视情况而定"),
+    ("IDP61", "Q29", "ordinal", dict(seq(PAY), **REFUSE), "升序；末项不便回答＝98"),
+    ("IDP63", "Q31", "nominal", seq(["している", "していない"]), "1＝关注，2＝不关注"),
+    ("IDP68", "Q36", "nominal", seq(JOB), "码序＝问卷顺序"),
+    ("IDP69", "Q37", "ordinal", dict(seq(INC37), **REFUSE), "升序；末项不愿回答＝98"),
+]
+
+code_rows = [["变量名", "题号", "测量层级", "新码", "原取值", "备注"]]
+for var, qno, lvl, mp, note in CODES:
+    j = P[var]
+    seen = collections.Counter(r[j] for r in BODY)
+    bad = sorted(v for v in seen if v not in mp and v not in NA_ALL)
+    if bad:
+        say("★ %s 有没进码表的取值：%s" % (var, bad))
+        continue
+    for k, v in mp.items():
+        code_rows.append([var, qno, lvl, v, k, note])
+    for r in BODY:
+        r[j] = r[j] if r[j] in NA_ALL else mp[r[j]]
+    unseen = sorted(k for k in mp if k not in seen)
+    say("%-17s 编 %2d 个码，覆盖 %d 格；从没被选的码：%s"
+        % (var, len(set(mp.values())), sum(seen.values()), "、".join(unseen) if unseen else "无"))
+say("")
+say("表里原本是文本的分类变量共 %d 个，编完后除开放题外全列都是数字。" % len(CODES))
+
+# =============================================================== 7 自检
+section("六、自检与各题分母")
+FAIL = []
+
+
+def need(cond, msg):
+    if not cond:
+        FAIL.append(msg)
+
+
+need(N == 600, "行数应为 600，实测 %d" % N)
+need(len(HEAD) == 426, "列数应为 426，实测 %d" % len(HEAD))
+need(all(len(r) == len(HEAD) for r in BODY), "有行列数不齐")
+need(not [1 for r in BODY for v in r if v == ""], "还留着空白格")
+need(len(S1_RPG) == 551, "S1 勾 RPG 应为 551，实测 %d" % len(S1_RPG))
+need(len(S1_MMO) == 219 and len(S2_MMO) == 69, "S1／S2 勾 MMORPG 应为 219／69")
+need(len(IS_MMO) == 288, "is_mmorpg=1 应为 288，实测 %d" % len(IS_MMO))
+need(not (S1_MMO & S2_MMO), "S1 与 S2 的 MMORPG 不应有人重叠")
+need(len(Q2_ESC) == 69, "Q2 逃亡口应为 69，实测 %d" % len(Q2_ESC))
+need(len(Q3_ESC) == 217, "Q3 逃亡口应为 217，实测 %d" % len(Q3_ESC))
+need(len(BRANCH_DUP) == 2, "主支与支线的重叠应为 2 人，实测 %d" % len(BRANCH_DUP))
+need(len(valid("IDP50__1")) == 531, "Q3 有效应为 531，实测 %d" % len(valid("IDP50__1")))
+need(len(valid("IDP51__1")) == 314, "Q4 有效应为 314，实测 %d" % len(valid("IDP51__1")))
+need(len(valid("IDP52")) == 215 and len(valid("IDP37")) == 385,
+     "主支／支线应为 215／385，实测 %d／%d" % (len(valid("IDP52")), len(valid("IDP37"))))
+need(len(valid("IDP43__1")) == 149 and len(valid("IDP44__1")) == 232, "Q15／Q16 应为 149／232")
+need(len(valid("IDP49__1")) == 529, "Q21 有效应为 529，实测 %d" % len(valid("IDP49__1")))
+need(len(valid("IDP56__1")) == 349, "Q24 有效应为 349，实测 %d" % len(valid("IDP56__1")))
+need(len(valid("IDP64__1")) == 245, "Q32 有效应为 245，实测 %d" % len(valid("IDP64__1")))
+need(len(valid("IDP53__1")) == 314, "Q22 有效应为 314，实测 %d" % len(valid("IDP53__1")))
+need(len(valid("IDP53__1") & IS_MMO) == 236, "Q22 的分析集应为 236 人")
+
+# Q22 的每一行都要与 Q3 的勾选逐行一致，勾了行的人八格都得是 0／1
+for g in range(1, 18):
+    a = {k for k in range(N) if GV("IDP53__%d" % g, k) == "1"}
+    b = {k for k in range(N) if GV("IDP50__%d" % g, k) == "1"}
+    need(a == b, "Q22 第 %d 行与 Q3 的勾选不一致" % g)
+    rate = ["IDP54/L%d__%d" % (468 + g, s) for s in range(1, 9)]
+    for k in range(N):
+        if k in a and not {GV(h, k) for h in rate} <= {"0", "1"}:
+            need(False, "Q22 第 %d 行有人勾了行却没打分" % g)
+
+# Q17 与 Q28 整题无数据。日后重投有值，这里会拦下来，提醒重新对口径。
+for h in ("IDP45", "IDP60", "IDP45_IDPA413", "IDP60_IDPA522"):
+    need(n_of(h, NA_NOREC) == 600,
+         "%s 应整列 99（整题无数据），实测 99 有 %d 格" % (h, n_of(h, NA_NOREC)))
+
+# 数字性：留下来的文本列应恰好是那 17 个开放题
+text_cols = sorted(h for h in HEAD
+                   if any(not v.isdigit() for r in BODY for v in [r[P[h]]]))
+need(text_cols == sorted(OPEN_TEXT), "留下的文本列与预期不符：%s" % text_cols)
+
+# 受访者键：ID 是行序，iirepSerial 是平台序列号，两者都不许被动
+need([r[P["ID"]] for r in BODY] == [str(i + 1) for i in range(N)], "ID 不是 1 到 600 的行序")
+need(len(set(r[P["iirepSerial"]] for r in BODY)) == 600, "iirepSerial 不是 600 个唯一值")
+need(HEAD[:5] == ["ID", "QUOTAGERANGE", "GENDER_NonBinary", "JPSTDREGION", "SCREENER1__1"],
+     "前五列与预期不符：%s" % HEAD[:5])
+need(HEAD[-3:] == NEW, "末三列应为新增标记：%s" % HEAD[-3:])
+
+fmt = "%-5s %-16s %7s %8s %7s  %s"
+say(fmt % ("题", "变量", "清洗后N", "其中MMO", "非MMO", "缺失码格数"))
+GATES = [
+    ("S1", "SCREENER1__1", "全卷"), ("S2", "SCREENER2__1", "仅 S1 勾 RPG"),
+    ("S3", "SCREENER3__1", "全卷"), ("Q2", "IDP30__1", "全卷"),
+    ("Q3", "IDP50__1", "Q2 未走逃亡口"), ("Q4", "IDP51__1", "Q3 勾过至少一款"),
+    ("Q5", "IDP52", "Q4 仍有在玩"), ("Q6", "IDP34", "同 Q5"),
+    ("Q7", "IDP35", "同 Q5"), ("Q8", "IDP36", "同 Q5；报告分母扣掉 98"),
+    ("Q9", "IDP37", "三个逃亡口之一"), ("Q10", "IDP38", "同 Q9"),
+    ("Q11", "IDP39", "同 Q9"), ("Q12", "IDP40", "同 Q9；报告分母扣掉 98"),
+    ("Q13", "IDP41", "全卷"), ("Q14", "IDP42", "全卷"),
+    ("Q15", "IDP43__1", "Q14 选不想体验"), ("Q16", "IDP44__1", "Q14 选想体验"),
+    ("Q17", "IDP45", "仅 MMORPG 玩家（整题无数据）"),
+    ("Q18", "IDP46__1", "仅 MMORPG 玩家（实投全卷）"),
+    ("Q19", "IDP47__1", "仅 MMORPG 玩家（实投全卷）"),
+    ("Q20", "IDP48__1", "仅 MMORPG 玩家（实投全卷）"),
+    ("Q21", "IDP49__1", "仅 MMORPG 玩家，且 Q20 未选一直在玩"),
+    ("Q22", "IDP53__1", "Q3 勾过至少一款"), ("Q23", "IDP55", "仅 MMORPG 玩家（实投全卷）"),
+    ("Q24", "IDP56__1", "仅 MMORPG 玩家且非独狼"), ("Q25", "IDP57__1", "同 Q24"),
+    ("Q26", "IDP58__1", "仅 MMORPG 玩家（实投全卷）"),
+    ("Q27", "IDP59__1", "仅 MMORPG 玩家（实投全卷）"),
+    ("Q28", "IDP60", "全卷（整题无数据）"), ("Q29", "IDP61", "全卷；报告分母扣掉 98"),
+    ("Q30", "IDP62__1", "全卷"), ("Q31", "IDP63", "全卷"),
+    ("Q32", "IDP64__1", "Q31 选关注"), ("Q33", "IDP65__1", "全卷"),
+    ("Q34", "IDP66__1", "全卷"), ("Q35", "IDP67__1", "全卷"),
+    ("Q36", "IDP68", "全卷"), ("Q37", "IDP69", "全卷；报告分母扣掉 98"),
+]
+den_rows = [["题号", "变量", "清洗后 N", "其中 MMORPG", "非 MMORPG", "缺失 97", "缺失 98",
+             "缺失 99", "设计门槛"]]
+for q, h, gate in GATES:
+    v = valid(h)
+    say(fmt % (q, h, len(v), len(v & IS_MMO), len(v - IS_MMO),
+               "97=%-6d 98=%-4d 99=%d" % (n_of(h, "97"), n_of(h, "98"), n_of(h, "99"))))
+    den_rows.append([q, h, str(len(v)), str(len(v & IS_MMO)), str(len(v - IS_MMO)),
+                     str(n_of(h, "97")), str(n_of(h, "98")), str(n_of(h, "99")), gate])
+
+s97 = sum(1 for r in BODY for j, h in enumerate(HEAD) if is_survey(h) and r[j] == "97")
+s98 = sum(1 for r in BODY for j, h in enumerate(HEAD) if is_survey(h) and r[j] == "98")
+s99 = sum(1 for r in BODY for j, h in enumerate(HEAD) if is_survey(h) and r[j] == "99")
+say("")
+say("问卷变量区一共用掉：97 = %d 格，98 = %d 格，99 = %d 格。" % (s97, s98, s99))
+say("98 另有 3 格在性别上（问卷 S4 的「回答しない」），不在问卷变量区内，合计 %d 格。" % (s98 + 3))
+say("ID 与 iirepSerial 没被动过；这两列里的 97／98／99 是真实取值，不是缺失码。")
+if FAIL:
+    say("")
+    say("自检未通过 %d 项：" % len(FAIL))
+    for f in FAIL:
+        say("  ✗ %s" % f)
+
+# =============================================================== 8 写盘
+section("七、产出")
+check_lines = []
+if CHECK_ONLY:
+    # 漂移比对：把这次算出来的表与磁盘上现有的产物逐格比，只看不写。
+    for path, head, rows in ((DST, HEAD, BODY),
+                             (CODES_OUT, code_rows[0], code_rows[1:]),
+                             (DEN_OUT, den_rows[0], den_rows[1:])):
+        name = os.path.basename(path)
+        if not os.path.exists(path):
+            check_lines.append("--check：%s 不存在，跳过。" % name)
+            continue
+        with io.open(path, encoding="utf-8-sig", newline="") as fh:
+            rd = csv.reader(fh)
+            old_head = next(rd)
+            old = [r for r in rd]
+        if old_head != head or len(old) != len(rows):
+            check_lines.append("--check：%s 不一致，表头或行数不同。" % name)
+            continue
+        where = ""
+        for k, (a, b) in enumerate(zip(old, rows)):
+            if a != b:
+                where = "第 %d 行" % (k + 1)
+                break
+        check_lines.append("--check：%s %s"
+                           % (name, "完全一致" if not where else "不一致，第一处在 " + where))
+    say("\n".join(check_lines))
+if FAIL:
+    print("cleaning FAILED：%d 项自检未通过" % len(FAIL))
+    for f in FAIL:
+        print("  ✗ %s" % f)
+    sys.exit(1)
+if CHECK_ONLY:
+    print("\n".join(check_lines))
+    sys.exit(0)
+
+os.makedirs(OUTDIR, exist_ok=True)
+with io.open(DST, "w", encoding="utf-8-sig", newline="") as fh:
+    w = csv.writer(fh)
+    w.writerow(HEAD)
+    w.writerows(BODY)
+with io.open(CODES_OUT, "w", encoding="utf-8-sig", newline="") as fh:
+    csv.writer(fh).writerows(code_rows)
+with io.open(DEN_OUT, "w", encoding="utf-8-sig", newline="") as fh:
+    csv.writer(fh).writerows(den_rows)
+with io.open(LOG_OUT, "w", encoding="utf-8") as fh:
+    fh.write("\n".join(LOG))
+print("cleaning OK: %d rows x %d cols; 97=%d 98=%d 99=%d" % (len(BODY), len(HEAD), s97, s98, s99))
