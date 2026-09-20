@@ -52,6 +52,12 @@ def is_survey(h):
 
 
 # =============================================================== 1 读入
+if not os.path.exists(SRC):
+    print("找不到输入文件：%s" % SRC)
+    print("把平台导出的原始数据放到 data/Original.csv，或者用两个参数指定路径：")
+    print("  python %s <原始数据.csv> <输出数据.csv>" % os.path.basename(__file__))
+    sys.exit(2)
+
 with io.open(SRC, encoding="utf-8-sig", newline="") as fh:
     rd = csv.reader(fh)
     NAMES = next(rd)              # 第一行：变量名
