@@ -18,7 +18,11 @@
       python 092601_cleaning.py 原始.csv 输出.csv   换路径
       python 092601_cleaning.py --check            只重算并与现有输出逐格比对，不写盘
 
-口径与逐题理由见 README.md；本文件只做实现。脚本可重跑，跑几次结果都一样。
+逐题口径与理由写在下面的注释里——本仓库的 README 只讲仓库怎么用，不涉及具体数据的口径。
+随数据走的清洗说明与码本放在项目目录里，不进本仓库。
+
+2026-09-20 两处口径落定：Q18 至 Q27 的门槛收到清洗阶段，非 MMORPG 玩家的作答置 97；
+Q9 那 2 名异常人在开放填空上的作废作答由 99 改记 97。
 """
 import csv
 import io
@@ -136,12 +140,9 @@ OPEN_TEXT = ["SCREENER1_12", "SCREENER2_10", "SCREENER3_5", "IDP37",
              "IDP67_IDPA575"]
 COL_NOTEXT = set(OPEN_TEXT) | {"IDP45_IDPA413", "IDP60_IDPA522", "IDP45", "IDP60"}
 
-# ⚠️ 一处待裁决，2026-09-20。
-# Q9 至 Q12 那 2 名异常人在 Q9 的开放填空（IDP37）上的作答被作废，按本项目的分码口径
-# 应记 97「作废的作答」。现有 RPG.csv 里这两格是 99：当年先用 99 做单一占位码，
-# 拆码时把开放列整列保留成 99，漏掉了这两格。脚本默认照现有文件写 99，好让第三方逐格复现；
-# 若裁决改成 97，把下面这个开关置 True、重跑脚本、重出码本即可（只动这 2 格）。
-VOID_OPEN_TEXT_AS_97 = False
+# 2026-09-20 修正：Q9 至 Q12 那 2 名异常人在 Q9 开放填空（IDP37）上的作答被作废，
+# 记 97「作废的作答」。旧版先用 99 做单一占位码、事后拆码时把开放列整列保留成 99，
+# 漏掉了这两格，现在按口径直写 97。
 
 # 待删的 16 列：整列常数、重复变量、平台不该有的选项列。
 DROP = (["BlocksOrder", "iirepEveryone", "resp_gender", "language",
@@ -250,18 +251,11 @@ say("Q4 没勾到游戏的 %d 人写 97（%d 格）。这一段跳转本来就�
 Q9_COLS = pick("IDP37") + pick("IDP38") + pick("IDP39") + pick("IDP40")
 c = fill_blanks(Q9_COLS)
 n9_had, n9_blank = void(Q9_COLS, BRANCH_DUP)
-if not VOID_OPEN_TEXT_AS_97:
-    for k in BRANCH_DUP:
-        if GV("IDP37", k) != NA_NOREC:
-            PUT("IDP37", k, NA_NOREC)
 say("")
 say("Q9 至 Q12 平行支线（笼统最常玩的那一款）：空白写缺失码（%d 格）；" % sum(c.values()))
 say("那 %d 名异常人在本支线的作答作废，原有作答 %d 格（另有 %d 格本来就是空的），"
     % (len(BRANCH_DUP), n9_had, n9_blank))
-say("按问卷流向他们只该走主支。")
-if not VOID_OPEN_TEXT_AS_97:
-    say("★ 其中 Q9 的开放填空（IDP37）两格写的是 99 而不是 97，照现有 RPG.csv 保留，"
-        "见文件头的开关说明。")
+say("按问卷流向他们只该走主支；Q9 的开放填空（IDP37）那两格也一并记 97。")
 say("两支恰好覆盖 %d 人：主支 %d ＋ 支线 %d。" % (N, len(valid("IDP52")), len(valid("IDP37"))))
 
 c = fill_blanks(pick("IDP41") + pick("IDP42") + pick("IDP43") + pick("IDP44"))
@@ -280,9 +274,7 @@ say("（这四列由第二段末尾的兜底扫描补上，那里会把格数一
 for p in ("IDP46", "IDP47", "IDP48"):
     fill_blanks(pick(p))
 say("")
-say("Q18 至 Q20 卖点、痛点、流失原因：全卷适用，空白写缺失码。")
-say("★ 这三题设计上只对 MMORPG 玩家出示，实投是全卷 %d 人作答，门槛没落位。" % N)
-say("数据原样保留，不写 97；分析时统一用 is_mmorpg 筛出 %d 人，全卷口径只作附录对照。" % len(IS_MMO))
+say("Q18 至 Q20 卖点、痛点、流失原因：空白写缺失码。这几题的门槛在第二段末尾统一处理。")
 say("Q20 另有分流：选「还没引退过」的 %d 人不答 Q21。" % (N - len(valid("IDP49__1"))))
 
 c = fill_blanks(pick("IDP49"))
@@ -302,7 +294,8 @@ say("第二层，平台自己加的第 18 行「一款都没玩过」整行作�
     % n2_had)
 say("第三层，其余空白写缺失码（%d 格）。空白来自 Q2 逃亡口的 %d 人，" % (sum(c.values()), len(Q2_ESC)))
 say("以及各人没勾过的游戏行——评分列按人按行铺开，某人在某行没被出示就没有值。")
-say("清洗后本题有效 = %d 人，保留 17 款游戏。" % len(valid("IDP53__1")))
+say("本段清洗后本题有效 = %d 人，保留 17 款游戏；MMORPG 门槛落位后见第二段末尾。"
+    % len(valid("IDP53__1")))
 say("★ 报告要注明：有 %d 名受访者在这 17 款游戏中一款都没有玩过。" % len(Q3_ESC))
 say("这个事实由 Q3 的 IDP50__18 承载，不依赖被作废的那一行。")
 
@@ -310,12 +303,11 @@ SOLO = {k for k in range(N) if GV("IDP55", k).startswith("ソロ")}
 say("")
 say("Q23 社交形态：全卷适用。选「独狼」的 %d 人跳过 Q24 与 Q25。" % len(SOLO))
 c = fill_blanks(pick("IDP56") + pick("IDP57"))
-say("Q24 与 Q25：这 %d 人写 97（%d 格）。这两题的门槛落在 Q23 上，没有落在 MMORPG 上，"
+say("Q24 与 Q25：这 %d 人写 97（%d 格）。这两题的门槛落在 Q23 的「独狼」上。"
     % (len(SOLO), sum(c.values())))
-say("做 MMORPG 玩家分析时分母取 is_mmorpg=1 的 %d 人。" % len(valid("IDP56__1") & IS_MMO))
 for p in ("IDP58", "IDP59"):
     fill_blanks(pick(p))
-say("Q26 付费动机、Q27 付费形式：实投全卷作答，门槛未落位，数据保留、分析时筛。")
+say("Q26 付费动机、Q27 付费形式：空白写缺失码。")
 
 say("")
 say("Q28 游戏外社群：★ 与 Q17 同因，投放时没有出题，两列全空，写 99。")
@@ -327,6 +319,25 @@ say("")
 say("Q30 至 Q35 信息触达与背景信息：空白写缺失码。")
 say("Q31 关注 → Q32：%d 人关注，%d 人不关注、不答 Q32。" % (len(valid("IDP64__1")), N - len(valid("IDP64__1"))))
 say("Q36 职业、Q37 可支配金额：单选，无空值。")
+
+# Q18 至 Q27 设计上只对 MMORPG 玩家成立。实投时门槛没落位，全卷 600 人都被问了，
+# 那 312 名非 MMORPG 玩家的作答不是「他们答了」，是平台漏了门槛，一律置 97。
+# Q17 与 Q28 不在此列：那两题整题无数据，全体 99。
+GATE_COLS = (pick("IDP46") + pick("IDP47") + pick("IDP48") + pick("IDP49")
+             + Q22_FLAG + Q22_RATE + pick("IDP55") + pick("IDP56") + pick("IDP57")
+             + pick("IDP58") + pick("IDP59"))
+g_had, g_blank = void(GATE_COLS, set(range(N)) - IS_MMO)
+say("")
+say("Q18 至 Q27 的门槛：设计上只对 MMORPG 玩家出示，实投门槛没落位、全卷 %d 人都被问了。" % N)
+say("那 %d 名非 MMORPG 玩家的作答一律置 97，原有作答 %d 格（另有 %d 格本来就是空的）。"
+    % (N - len(IS_MMO), g_had, g_blank))
+say("Q17 与 Q28 不在此列：那两题整题无数据，全体写 99。")
+say("门槛收到清洗阶段之后，这一块的分母就是文件里的 N：")
+say("  Q18 至 Q20、Q23、Q26、Q27 各 %d 人；" % len(valid("IDP46__1")))
+say("  Q21 再叠加 Q20 未选「一直在玩」得 %d 人；Q22 再叠加 Q3 勾过至少一款得 %d 人；"
+    % (len(valid("IDP49__1")), len(valid("IDP53__1"))))
+say("  Q24 与 Q25 再叠加 Q23 非独狼得 %d 人。" % len(valid("IDP56__1")))
+say("做全卷对照要另立一次导出：本文件里那一块的 600 人口径已经没有了。")
 
 c = fill_blanks([h for h in NAMES if is_survey(h)])
 say("")
@@ -505,17 +516,19 @@ need(len(valid("IDP51__1")) == 314, "Q4 有效应为 314，实测 %d" % len(vali
 need(len(valid("IDP52")) == 215 and len(valid("IDP37")) == 385,
      "主支／支线应为 215／385，实测 %d／%d" % (len(valid("IDP52")), len(valid("IDP37"))))
 need(len(valid("IDP43__1")) == 149 and len(valid("IDP44__1")) == 232, "Q15／Q16 应为 149／232")
-need(len(valid("IDP49__1")) == 529, "Q21 有效应为 529，实测 %d" % len(valid("IDP49__1")))
-need(len(valid("IDP56__1")) == 349, "Q24 有效应为 349，实测 %d" % len(valid("IDP56__1")))
-need(len(valid("IDP64__1")) == 245, "Q32 有效应为 245，实测 %d" % len(valid("IDP64__1")))
-need(len(valid("IDP53__1")) == 314, "Q22 有效应为 314，实测 %d" % len(valid("IDP53__1")))
-need(len(valid("IDP53__1") & IS_MMO) == 236, "Q22 的分析集应为 236 人")
+need(len(valid("IDP46__1")) == 288, "Q18 至 Q20、Q26、Q27 的分母应为 288")
+need(len(valid("IDP55")) == 288, "Q23 的分母应为 288，实测 %d" % len(valid("IDP55")))
+need(len(valid("IDP49__1")) == 256, "Q21 有效应为 256，实测 %d" % len(valid("IDP49__1")))
+need(len(valid("IDP56__1")) == 205, "Q24 有效应为 205，实测 %d" % len(valid("IDP56__1")))
+need(len(valid("IDP64__1")) == 245, "Q32 有效应为 245，实测 %d（本题不在 MMORPG 那一块里）"
+     % len(valid("IDP64__1")))
+need(len(valid("IDP53__1")) == 236, "Q22 有效应为 236，实测 %d" % len(valid("IDP53__1")))
 
 # Q22 的每一行都要与 Q3 的勾选逐行一致，勾了行的人八格都得是 0／1
 for g in range(1, 18):
     a = {k for k in range(N) if GV("IDP53__%d" % g, k) == "1"}
-    b = {k for k in range(N) if GV("IDP50__%d" % g, k) == "1"}
-    need(a == b, "Q22 第 %d 行与 Q3 的勾选不一致" % g)
+    b = {k for k in range(N) if GV("IDP50__%d" % g, k) == "1"} & IS_MMO
+    need(a == b, "Q22 第 %d 行应等于「Q3 勾了这款且是 MMORPG 玩家」的人" % g)
     rate = ["IDP54/L%d__%d" % (468 + g, s) for s in range(1, 9)]
     for k in range(N):
         if k in a and not {GV(h, k) for h in rate} <= {"0", "1"}:
@@ -551,14 +564,15 @@ GATES = [
     ("Q13", "IDP41", "全卷"), ("Q14", "IDP42", "全卷"),
     ("Q15", "IDP43__1", "Q14 选不想体验"), ("Q16", "IDP44__1", "Q14 选想体验"),
     ("Q17", "IDP45", "仅 MMORPG 玩家（整题无数据）"),
-    ("Q18", "IDP46__1", "仅 MMORPG 玩家（实投全卷）"),
-    ("Q19", "IDP47__1", "仅 MMORPG 玩家（实投全卷）"),
-    ("Q20", "IDP48__1", "仅 MMORPG 玩家（实投全卷）"),
+    ("Q18", "IDP46__1", "仅 MMORPG 玩家"),
+    ("Q19", "IDP47__1", "仅 MMORPG 玩家"),
+    ("Q20", "IDP48__1", "仅 MMORPG 玩家"),
     ("Q21", "IDP49__1", "仅 MMORPG 玩家，且 Q20 未选一直在玩"),
-    ("Q22", "IDP53__1", "Q3 勾过至少一款"), ("Q23", "IDP55", "仅 MMORPG 玩家（实投全卷）"),
+    ("Q22", "IDP53__1", "仅 MMORPG 玩家，且 Q3 勾过至少一款"),
+    ("Q23", "IDP55", "仅 MMORPG 玩家"),
     ("Q24", "IDP56__1", "仅 MMORPG 玩家且非独狼"), ("Q25", "IDP57__1", "同 Q24"),
-    ("Q26", "IDP58__1", "仅 MMORPG 玩家（实投全卷）"),
-    ("Q27", "IDP59__1", "仅 MMORPG 玩家（实投全卷）"),
+    ("Q26", "IDP58__1", "仅 MMORPG 玩家"),
+    ("Q27", "IDP59__1", "仅 MMORPG 玩家"),
     ("Q28", "IDP60", "全卷（整题无数据）"), ("Q29", "IDP61", "全卷；报告分母扣掉 98"),
     ("Q30", "IDP62__1", "全卷"), ("Q31", "IDP63", "全卷"),
     ("Q32", "IDP64__1", "Q31 选关注"), ("Q33", "IDP65__1", "全卷"),
