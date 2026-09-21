@@ -10,7 +10,7 @@
 
 输入  data/Original.csv    600 行 × 438 列，前两行都是表头（第一行变量名，第二行题目与选项正文）
 输出  data/RPG.csv         600 行 × 426 列
-      data/值码表.csv       文本型分类变量的码表（与《变量映射底稿.xlsx》的「值码表」同源）
+      data/值码表.md        数据集里每一列的值码，markdown（见第五段末尾的构造器）
       data/各题分母.csv     逐题清洗后的有效 N、MMORPG 人数、三种缺失码的格数
       data/清洗日志.txt     每一步动了什么、动了多少格
 
@@ -44,7 +44,7 @@ ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 SRC = ARGS[0] if ARGS else os.path.join(HERE, "data", "Original.csv")
 DST = ARGS[1] if len(ARGS) > 1 else os.path.join(HERE, "data", "RPG.csv")
 OUTDIR = os.path.dirname(os.path.abspath(DST))
-CODES_OUT = os.path.join(OUTDIR, "值码表.csv")
+CODES_OUT = os.path.join(OUTDIR, "值码表.md")
 DEN_OUT = os.path.join(OUTDIR, "各题分母.csv")
 LOG_OUT = os.path.join(OUTDIR, "清洗日志.txt")
 
@@ -65,10 +65,11 @@ if not os.path.exists(SRC):
 with io.open(SRC, encoding="utf-8-sig", newline="") as fh:
     rd = csv.reader(fh)
     NAMES = next(rd)              # 第一行：变量名
-    next(rd)                      # 第二行：题目与选项正文，不是数据
+    TEXTS_ROW = next(rd)          # 第二行：题目与选项正文，不是数据；留着做值码表的标签
     RAW = [list(r) for r in rd]   # 第三行起才是受访者
 N = len(RAW)
 RAW_IDX = {h: i for i, h in enumerate(NAMES)}
+TEXTS = dict(zip(NAMES, TEXTS_ROW))
 
 # 工作副本。第四段删完列之后，CUR_ROWS／CUR_IDX 指向收窄后的表，后面的自检都读它。
 WORK = [list(r) + [""] * (len(NAMES) - len(r)) for r in RAW]
@@ -472,7 +473,7 @@ CODES = [
     ("IDP69", "Q37", "ordinal", dict(seq(INC37), **REFUSE), "升序；末项不愿回答＝98"),
 ]
 
-code_rows = [["变量名", "题号", "测量层级", "新码", "原取值", "备注"]]
+CODE_TABLE = {}        # 变量 → (题号, 测量层级, {码: 原取值})，值码表用
 for var, qno, lvl, mp, note in CODES:
     j = P[var]
     seen = collections.Counter(r[j] for r in BODY)
@@ -480,15 +481,159 @@ for var, qno, lvl, mp, note in CODES:
     if bad:
         say("★ %s 有没进码表的取值：%s" % (var, bad))
         continue
-    for k, v in mp.items():
-        code_rows.append([var, qno, lvl, v, k, note])
     for r in BODY:
         r[j] = r[j] if r[j] in NA_ALL else mp[r[j]]
     unseen = sorted(k for k in mp if k not in seen)
+    CODE_TABLE[var] = (qno, lvl, {v: k for k, v in mp.items()})
     say("%-17s 编 %2d 个码，覆盖 %d 格；从没被选的码：%s"
         % (var, len(set(mp.values())), sum(seen.values()), "、".join(unseen) if unseen else "无"))
 say("")
 say("表里原本是文本的分类变量共 %d 个，编完后除开放题外全列都是数字。" % len(CODES))
+
+# ---------- 值码表：数据集里的每一列都要在这张表里有行 ----------
+# 出成 markdown，随数据走。码只列这一列实际出现的那些，按值升序；标签取原始表第二行。
+QNO_BY_VAR = {
+    "SCREENER1": "S1", "SCREENER2": "S2", "SCREENER3": "S3",
+    "IDP30": "Q2", "IDP50": "Q3", "IDP51": "Q4", "IDP52": "Q5", "IDP34": "Q6",
+    "IDP35": "Q7", "IDP36": "Q8", "IDP37": "Q9", "IDP38": "Q10", "IDP39": "Q11",
+    "IDP40": "Q12", "IDP41": "Q13", "IDP42": "Q14", "IDP43": "Q15", "IDP44": "Q16",
+    "IDP45": "Q17", "IDP46": "Q18", "IDP47": "Q19", "IDP48": "Q20", "IDP49": "Q21",
+    "IDP53": "Q22", "IDP55": "Q23", "IDP56": "Q24", "IDP57": "Q25",
+    "IDP58": "Q26", "IDP59": "Q27", "IDP60": "Q28", "IDP61": "Q29", "IDP62": "Q30",
+    "IDP63": "Q31", "IDP64": "Q32", "IDP65": "Q33", "IDP66": "Q34", "IDP67": "Q35",
+    "IDP68": "Q36", "IDP69": "Q37",
+    "QUOTAGERANGE": "S5", "GENDER_NonBinary": "S4", "JPSTDREGION": "（面板）",
+    "ID": "—", "iirepSerial": "—",
+    "is_mmorpg": "（派生）", "branch": "（派生）", "elig_q4": "（派生）",
+}
+MISSING_MEAN = {
+    NA_SKIP: "不适用：跳转未出示、门槛过滤，或清洗时事后作废的作答",
+    NA_REFUSE: "明确表示不愿回答／不便回答",
+    NA_NOREC: "无可用记录：整题无数据，或这一格没有文本",
+}
+FLAG_MEAN = {
+    "is_mmorpg": ({"1": "MMORPG 玩家：S1 或 S2 勾了 MMORPG",
+                   "0": "非 MMORPG 玩家：S1 与 S2 都没勾"},
+                  "是否 MMORPG 玩家（S1 与 S2 的并集）"),
+    "branch": ({"1": "主支：走 Q5 至 Q8，只问自报的那一款",
+                "2": "支线：走 Q9 至 Q12，问笼统的最常玩游戏"},
+               "问卷走的哪条腿"),
+    "elig_q4": ({"1": "在 Q4 与 Q22 的应答题人群里：Q3 勾过至少一款",
+                 "0": "不在：Q3 走的是逃亡口"},
+                "是否为 Q4 与 Q22 的应答题人群"),
+}
+WHOLE_MISSING = {"IDP45", "IDP45_IDPA413", "IDP60", "IDP60_IDPA522"}
+OPEN_ALSO = set(COL_NOTEXT) | {"IDP56_IDPA480", "IDP66_IDPA567"}
+FORM_PANEL = "单选（面板配额）"
+FORM_RECODED = "单选（已编码）"
+FORM_DUMMY = "多选选项（0/1）"
+FORM_OPEN = "开放题（文本）"
+FORM_WHOLE = "整题无数据"
+FORM_FLAG = "派生标记"
+FORM_KEY = "标识"
+
+
+def short(text, n=80):
+    # 标签按 UKDS 的口径不超过 80 字符。
+    t = " ".join(str(text).split())
+    return t if len(t) <= n else t[:n - 1] + "…"
+
+
+def qno_of(h):
+    # 平台内码 → 问卷题号。
+    if h.startswith("IDP54/L"):
+        return "Q22"
+    for pre, q in QNO_BY_VAR.items():
+        if h == pre or h.startswith(pre + "__") or h.startswith(pre + "_IDPA") \
+                or h == pre + "_12" or h == pre + "_10" or h == pre + "_5":
+            return q
+    return "—"
+
+
+def label_of(h):
+    # 变量标签：取原始表第二行「题干 - 选项」的右半边；没有分隔符就用整句。
+    t = TEXTS.get(h, h)
+    stem, _, opt = t.partition(" - ")
+    if not opt:
+        return short(t)
+    if h.startswith("IDP54/L"):
+        return short("%s：%s" % (stem, opt))   # Q22 的评分列：题干是游戏名，两边都要
+    return short(opt)
+
+
+def present(h):
+    # 这一列实际出现的取值；数字码按值升序排前面。
+    vals = {r[P[h]] for r in BODY}
+    nums = sorted((v for v in vals if v.isdigit()), key=int)
+    return nums + sorted(v for v in vals if not v.isdigit() and v != "")
+
+
+def code_rows_of(h):
+    # 返回 [(题号, 形态, 值码, 该码的含义)]，覆盖这一列实际出现的每一个码。
+    if h == "ID":
+        return [("—", FORM_KEY, "1–%d" % N,
+                 "受访者序号，等于文件内行序；用来 join 与按人聚类")]
+    if h == "iirepSerial":
+        return [("—", FORM_KEY, "（不编码）",
+                 "平台序列号，%d 个唯一值，用来向平台回溯" % N)]
+    if h in FLAG_MEAN:
+        mp = FLAG_MEAN[h][0]
+        return [("（派生）", FORM_FLAG, c, mp[c]) for c in sorted(mp)]
+    if h in CODE_TABLE:
+        qno, lvl, back = CODE_TABLE[h]
+        form = FORM_PANEL if h in ("QUOTAGERANGE", "GENDER_NonBinary", "JPSTDREGION") \
+            else FORM_RECODED
+        out = []
+        for c in sorted(back, key=int):
+            mean = MISSING_MEAN[c] if c in NA_ALL else "问卷里的选项 %s：%s" % (c, back[c])
+            out.append((qno, form, c, mean))
+        return out
+    if h in WHOLE_MISSING:
+        return [(qno_of(h), FORM_WHOLE, NA_NOREC,
+                 "投放时这道题没有出出来，全列 99，保留列作占位等重投回填")]
+    if h in OPEN_ALSO:
+        out = [(qno_of(h), FORM_OPEN, "自由文本",
+                "受访者手写的文字，不编码；有文本的格数见《变量映射》")]
+        for c in (NA_SKIP, NA_NOREC):
+            out.append((qno_of(h), FORM_OPEN, c, MISSING_MEAN[c]))
+        return out
+    # 剩下的问卷变量区列都是多选的选项列：没被出示的记 97，没勾的记 0
+    return [(qno_of(h), FORM_DUMMY, c,
+             {"0": "未勾选", "1": "勾选了这一项"}.get(c, MISSING_MEAN.get(c, c)))
+            for c in ("0", "1", NA_SKIP)]
+
+
+def build_code_markdown():
+    # 出值码表：一行一个（变量 × 码），数据集里的每一列都在里面有行。
+    rows = []
+    for i, h in enumerate(HEAD):
+        lab = label_of(h)
+        for qno, form, code, mean in code_rows_of(h):
+            rows.append([i + 1, h, lab, qno, form, code, mean])
+    L = ["# 值码表",
+         "",
+         "由 `092601_cleaning.py` 生成，随 `RPG.csv` 一起走。数据改了要重跑脚本重出，别手工改这张表。",
+         "数据集里的每一列在下面都有行，一行一个码。「值码」列的是该变量的定义码，",
+         "不表示每个码都有人选；每个码实际占多少格见《变量映射》。",
+         "",
+         "## 缺失码",
+         "",
+         "| 码 | UKDS 的语义 | 本数据里的用法 |",
+         "| --- | --- | --- |",
+         "| 97 | not applicable (skipped) | 跳转未出示、门槛过滤，以及清洗时事后作废的作答 |",
+         "| 98 | not provided (no answer) | 明确表示不愿回答／不便回答（问卷印的「回答したくない」「回答しない」） |",
+         "| 99 | not recorded | 无可用记录：整题无数据、开放题没有文本、性别落不进二值的「その他」 |",
+         "| 0／1 | — | 多选哑变量的两个取值，不是缺失码 |",
+         "| 95／96 | error／not known | 本数据不用 |",
+         "",
+         "## 逐变量值码",
+         "",
+         "| 序 | 变量名 | 变量标签 | 题号 | 形态 | 值码 | 该码的含义 |",
+         "| --- | --- | --- | --- | --- | --- | --- |"]
+    for r in rows:
+        L.append("| " + " | ".join(str(x).replace("|", "｜") for x in r) + " |")
+    return "\n".join(L) + "\n", rows
+
 
 # =============================================================== 7 自检
 section("六、自检与各题分母")
@@ -550,6 +695,8 @@ need(len(set(r[P["iirepSerial"]] for r in BODY)) == 600, "iirepSerial 不是 600
 need(HEAD[:5] == ["ID", "QUOTAGERANGE", "GENDER_NonBinary", "JPSTDREGION", "SCREENER1__1"],
      "前五列与预期不符：%s" % HEAD[:5])
 need(HEAD[-3:] == NEW, "末三列应为新增标记：%s" % HEAD[-3:])
+missing_code = [h for h in HEAD if not code_rows_of(h)]
+need(not missing_code, "值码表漏了这些列：%s" % missing_code[:10])
 
 fmt = "%-5s %-16s %7s %8s %7s  %s"
 say(fmt % ("题", "变量", "清洗后N", "其中MMO", "非MMO", "缺失码格数"))
@@ -606,12 +753,23 @@ section("七、产出")
 check_lines = []
 if CHECK_ONLY:
     # 漂移比对：把这次算出来的表与磁盘上现有的产物逐格比，只看不写。
-    for path, head, rows in ((DST, HEAD, BODY),
-                             (CODES_OUT, code_rows[0], code_rows[1:]),
-                             (DEN_OUT, den_rows[0], den_rows[1:])):
+    CODE_MD, _rows = build_code_markdown()
+    for path, kind, head, rows in ((DST, "csv", HEAD, BODY),
+                                   (DEN_OUT, "csv", den_rows[0], den_rows[1:]),
+                                   (CODES_OUT, "md", None, CODE_MD.splitlines())):
         name = os.path.basename(path)
         if not os.path.exists(path):
             check_lines.append("--check：%s 不存在，跳过。" % name)
+            continue
+        if kind == "md":
+            old = io.open(path, encoding="utf-8").read().splitlines()
+            if old == rows:
+                check_lines.append("--check：%s 完全一致" % name)
+                continue
+            n = min(len(old), len(rows))
+            at = next((k for k in range(n) if old[k] != rows[k]), n)
+            check_lines.append("--check：%s 不一致，行数 %d／%d，第一处在第 %d 行"
+                               % (name, len(old), len(rows), at + 1))
             continue
         with io.open(path, encoding="utf-8-sig", newline="") as fh:
             rd = csv.reader(fh)
@@ -642,8 +800,10 @@ with io.open(DST, "w", encoding="utf-8-sig", newline="") as fh:
     w = csv.writer(fh)
     w.writerow(HEAD)
     w.writerows(BODY)
-with io.open(CODES_OUT, "w", encoding="utf-8-sig", newline="") as fh:
-    csv.writer(fh).writerows(code_rows)
+CODE_MD, CODE_ROWS = build_code_markdown()
+with io.open(CODES_OUT, "w", encoding="utf-8") as fh:
+    fh.write(CODE_MD)
+say("值码表：%d 行，覆盖数据集里全部 %d 列（markdown）。" % (len(CODE_ROWS), len(HEAD)))
 with io.open(DEN_OUT, "w", encoding="utf-8-sig", newline="") as fh:
     csv.writer(fh).writerows(den_rows)
 with io.open(LOG_OUT, "w", encoding="utf-8") as fh:
