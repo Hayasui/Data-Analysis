@@ -490,47 +490,86 @@ for var, qno, lvl, mp, note in CODES:
 say("")
 say("表里原本是文本的分类变量共 %d 个，编完后除开放题外全列都是数字。" % len(CODES))
 
-# ---------- 值码表：数据集里的每一列都要在这张表里有行 ----------
-# 出成 markdown，随数据走。码只列这一列实际出现的那些，按值升序；标签取原始表第二行。
-QNO_BY_VAR = {
-    "SCREENER1": "S1", "SCREENER2": "S2", "SCREENER3": "S3",
-    "IDP30": "Q2", "IDP50": "Q3", "IDP51": "Q4", "IDP52": "Q5", "IDP34": "Q6",
-    "IDP35": "Q7", "IDP36": "Q8", "IDP37": "Q9", "IDP38": "Q10", "IDP39": "Q11",
-    "IDP40": "Q12", "IDP41": "Q13", "IDP42": "Q14", "IDP43": "Q15", "IDP44": "Q16",
-    "IDP45": "Q17", "IDP46": "Q18", "IDP47": "Q19", "IDP48": "Q20", "IDP49": "Q21",
-    "IDP53": "Q22", "IDP55": "Q23", "IDP56": "Q24", "IDP57": "Q25",
-    "IDP58": "Q26", "IDP59": "Q27", "IDP60": "Q28", "IDP61": "Q29", "IDP62": "Q30",
-    "IDP63": "Q31", "IDP64": "Q32", "IDP65": "Q33", "IDP66": "Q34", "IDP67": "Q35",
-    "IDP68": "Q36", "IDP69": "Q37",
-    "QUOTAGERANGE": "S5", "GENDER_NonBinary": "S4", "JPSTDREGION": "（面板）",
-    "ID": "—", "iirepSerial": "—",
-    "is_mmorpg": "（派生）", "branch": "（派生）", "elig_q4": "（派生）",
+# ---------- 值码表 ----------
+# 按问卷的题目排，读起来像附在问卷上的一张码表：开头把通用码讲清，正文一题一段，
+# 单选与有序题的码逐题列全，多选的选项列一行一个变量。数据集里的每一列都要有落点。
+COMMON = [
+    ("1", "选中／确认", "多选题的每个选项列、二值标记"),
+    ("0", "没选／否", "同上"),
+    ("97", "不适用", "跳转未出示、门槛过滤，以及清洗时事后作废的作答"),
+    ("98", "明确表示不愿回答／不便回答", "问卷里印了这个选项的题：付费与金额四题、性别一题"),
+    ("99", "无可用记录", "整题无数据；开放题没有文本"),
+    ("自由文本", "受访者手写的文字", "开放题列"),
+]
+
+QUESTION_ORDER = [
+    ("甄别", ["S1", "S2", "S3", "S4", "S5", "REGION"]),
+    ("一、MMORPG 认知与主玩游戏",
+     ["Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8", "Q9", "Q10", "Q11", "Q12"]),
+    ("二、RO 认知与新作意愿", ["Q13", "Q14", "Q15", "Q16"]),
+    ("三、品类形象与卖点", ["Q17", "Q18", "Q19", "Q20", "Q21", "Q22"]),
+    ("四、社交与付费", ["Q23", "Q24", "Q25", "Q26", "Q27", "Q28", "Q29"]),
+    ("五、信息触达", ["Q30", "Q31", "Q32", "Q33"]),
+    ("六、背景信息", ["Q34", "Q35", "Q36", "Q37"]),
+]
+Q_PREFIX = {
+    "S1": "SCREENER1", "S2": "SCREENER2", "S3": "SCREENER3",
+    "Q2": "IDP30", "Q3": "IDP50", "Q4": "IDP51", "Q5": "IDP52", "Q6": "IDP34",
+    "Q7": "IDP35", "Q8": "IDP36", "Q9": "IDP37", "Q10": "IDP38", "Q11": "IDP39",
+    "Q12": "IDP40", "Q13": "IDP41", "Q14": "IDP42", "Q15": "IDP43", "Q16": "IDP44",
+    "Q17": "IDP45", "Q18": "IDP46", "Q19": "IDP47", "Q20": "IDP48", "Q21": "IDP49",
+    "Q22": "IDP53", "Q23": "IDP55", "Q24": "IDP56", "Q25": "IDP57", "Q26": "IDP58",
+    "Q27": "IDP59", "Q28": "IDP60", "Q29": "IDP61", "Q30": "IDP62", "Q31": "IDP63",
+    "Q32": "IDP64", "Q33": "IDP65", "Q34": "IDP66", "Q35": "IDP67", "Q36": "IDP68",
+    "Q37": "IDP69",
+}
+Q_FIXED = {"S4": ["GENDER_NonBinary"], "S5": ["QUOTAGERANGE"], "REGION": ["JPSTDREGION"]}
+Q_STEM = {"Q22": "IDP53__1", "S4": "GENDER_NonBinary", "S5": "QUOTAGERANGE",
+          "REGION": "JPSTDREGION"}
+Q_TITLE = {"REGION": "（面板）地域"}
+Q_GATE = {
+    "S1": "全卷作答；RPG 与 MMORPG 都没勾的人会被终止，被终止的人不在本数据里",
+    "S2": "只对 S1 勾了 RPG 的 551 人出示，另 49 人写 97",
+    "S3": "全卷作答",
+    "S4": "面板配额变量，全卷都有",
+    "S5": "面板配额变量，数据里只有三档",
+    "REGION": "面板配额变量",
+    "Q2": "全卷作答；选「以上都没听过」的 69 人跳过 Q3",
+    "Q3": "Q2 走了逃亡口的 69 人跳过",
+    "Q4": "Q3 勾过至少一款的 314 人作答；Q3 逃亡口的 217 人在这里的作答作废，记 97",
+    "Q5": "Q4 勾到游戏的 215 人作答",
+    "Q6": "同 Q5",
+    "Q7": "同 Q5",
+    "Q8": "同 Q5",
+    "Q9": "三个逃亡口之一；走主支的 215 人跳过",
+    "Q10": "同 Q9",
+    "Q11": "同 Q9",
+    "Q12": "同 Q9",
+    "Q13": "全卷作答",
+    "Q14": "全卷作答",
+    "Q15": "Q14 选「完全不想」「不太想」的 149 人作答",
+    "Q16": "Q14 选「比较想」「非常想」的 232 人作答，与 Q15 互斥",
+    "Q18": "仅 MMORPG 玩家；实投门槛没落位，清洗时把非 MMORPG 玩家的作答置 97，清洗后 288 人",
+    "Q19": "仅 MMORPG 玩家；清洗后 288 人",
+    "Q20": "仅 MMORPG 玩家；清洗后 288 人",
+    "Q21": "仅 MMORPG 玩家，且 Q20 未选「一直在玩」；清洗后 256 人",
+    "Q22": "仅 MMORPG 玩家，且 Q3 勾过至少一款；清洗后 236 人",
+    "Q23": "仅 MMORPG 玩家；清洗后 288 人",
+    "Q24": "仅 MMORPG 玩家且 Q23 非独狼；清洗后 205 人",
+    "Q25": "同 Q24",
+    "Q26": "仅 MMORPG 玩家；清洗后 288 人",
+    "Q27": "仅 MMORPG 玩家；清洗后 288 人",
+    "Q29": "全卷作答；15 人「不愿回答」记 98",
+    "Q32": "Q31 选「关注」的 245 人作答",
+    "Q37": "全卷作答；14 人「不愿回答」记 98",
 }
 MISSING_MEAN = {
     NA_SKIP: "不适用：跳转未出示、门槛过滤，或清洗时事后作废的作答",
     NA_REFUSE: "明确表示不愿回答／不便回答",
     NA_NOREC: "无可用记录：整题无数据，或这一格没有文本",
 }
-FLAG_MEAN = {
-    "is_mmorpg": ({"1": "MMORPG 玩家：S1 或 S2 勾了 MMORPG",
-                   "0": "非 MMORPG 玩家：S1 与 S2 都没勾"},
-                  "是否 MMORPG 玩家（S1 与 S2 的并集）"),
-    "branch": ({"1": "主支：走 Q5 至 Q8，只问自报的那一款",
-                "2": "支线：走 Q9 至 Q12，问笼统的最常玩游戏"},
-               "问卷走的哪条腿"),
-    "elig_q4": ({"1": "在 Q4 与 Q22 的应答题人群里：Q3 勾过至少一款",
-                 "0": "不在：Q3 走的是逃亡口"},
-                "是否为 Q4 与 Q22 的应答题人群"),
-}
 WHOLE_MISSING = {"IDP45", "IDP45_IDPA413", "IDP60", "IDP60_IDPA522"}
 OPEN_ALSO = set(COL_NOTEXT) | {"IDP56_IDPA480", "IDP66_IDPA567"}
-FORM_PANEL = "单选（面板配额）"
-FORM_RECODED = "单选（已编码）"
-FORM_DUMMY = "多选选项（0/1）"
-FORM_OPEN = "开放题（文本）"
-FORM_WHOLE = "整题无数据"
-FORM_FLAG = "派生标记"
-FORM_KEY = "标识"
 
 
 def short(text, n=80):
@@ -539,100 +578,141 @@ def short(text, n=80):
     return t if len(t) <= n else t[:n - 1] + "…"
 
 
-def qno_of(h):
-    # 平台内码 → 问卷题号。
-    if h.startswith("IDP54/L"):
-        return "Q22"
-    for pre, q in QNO_BY_VAR.items():
-        if h == pre or h.startswith(pre + "__") or h.startswith(pre + "_IDPA") \
-                or h == pre + "_12" or h == pre + "_10" or h == pre + "_5":
-            return q
-    return "—"
-
-
-def label_of(h):
-    # 变量标签：取原始表第二行「题干 - 选项」的右半边；没有分隔符就用整句。
+def label_stem(h):
+    # 题干：原始表第二行里「题干 - 选项」的左半边。
     t = TEXTS.get(h, h)
-    stem, _, opt = t.partition(" - ")
-    if not opt:
-        return short(t)
-    if h.startswith("IDP54/L"):
-        return short("%s：%s" % (stem, opt))   # Q22 的评分列：题干是游戏名，两边都要
-    return short(opt)
+    return short(t.split(" - ", 1)[0])
 
 
-def present(h):
-    # 这一列实际出现的取值；数字码按值升序排前面。
-    vals = {r[P[h]] for r in BODY}
-    nums = sorted((v for v in vals if v.isdigit()), key=int)
-    return nums + sorted(v for v in vals if not v.isdigit() and v != "")
+def label_opt(h):
+    # 选项正文：右半边；没有分隔符就用整句。
+    t = TEXTS.get(h, h)
+    return short(t.split(" - ", 1)[1]) if " - " in t else short(t)
 
 
-def code_rows_of(h):
-    # 返回 [(题号, 形态, 值码, 该码的含义)]，覆盖这一列实际出现的每一个码。
-    if h == "ID":
-        return [("—", FORM_KEY, "1–%d" % N,
-                 "受访者序号，等于文件内行序；用来 join 与按人聚类")]
-    if h == "iirepSerial":
-        return [("—", FORM_KEY, "（不编码）",
-                 "平台序列号，%d 个唯一值，用来向平台回溯" % N)]
-    if h in FLAG_MEAN:
-        mp = FLAG_MEAN[h][0]
-        return [("（派生）", FORM_FLAG, c, mp[c]) for c in sorted(mp)]
-    if h in CODE_TABLE:
-        qno, lvl, back = CODE_TABLE[h]
-        form = FORM_PANEL if h in ("QUOTAGERANGE", "GENDER_NonBinary", "JPSTDREGION") \
-            else FORM_RECODED
-        out = []
+def q_cols(q):
+    # 这一题的列，按数据集列序。
+    if q in Q_FIXED:
+        return [h for h in Q_FIXED[q] if h in P]
+    if q == "Q22":
+        return ([h for h in pick("IDP53") if h in P]
+                + [h for h in HEAD if h.startswith("IDP54/")])
+    return [h for h in pick(Q_PREFIX[q]) if h in P]
+
+
+def question_block(q):
+    # 一题一段：题号加题干，下面按题型摆码。
+    cols = q_cols(q)
+    if not cols:
+        return [], set()
+    head = ("（面板配额）地域 `JPSTDREGION`" if q == "REGION"
+            else "%s %s" % (Q_TITLE.get(q, q), label_stem(Q_STEM.get(q, cols[0]))))
+    L = ["### %s" % head, ""]
+    rec = [h for h in cols if h in CODE_TABLE]
+    whole = [h for h in cols if h in WHOLE_MISSING]
+    opens = [h for h in cols if h in OPEN_ALSO]
+    opts = [h for h in cols if h not in rec + whole + opens]
+
+    if whole:                      # 整题无数据的题
+        L.append("整题无数据：投放时这道题没有出出来，%s 全列 99，保留列作占位等重投回填。"
+                 % "、".join("`%s`" % h for h in whole))
+        L.append("")
+        return L, set(cols)
+
+    if rec:                        # 单选与面板配额变量
+        h = rec[0]
+        back = CODE_TABLE[h][2]
+        form = "单选（面板配额）" if h in ("QUOTAGERANGE", "GENDER_NonBinary",
+                                     "JPSTDREGION") else "单选"
+        L.append("%s，%s。变量 `%s`。" % (form, Q_GATE.get(q, "全卷作答"), h))
+        L.append("")
         for c in sorted(back, key=int):
-            mean = MISSING_MEAN[c] if c in NA_ALL else "问卷里的选项 %s：%s" % (c, back[c])
-            out.append((qno, form, c, mean))
-        return out
-    if h in WHOLE_MISSING:
-        return [(qno_of(h), FORM_WHOLE, NA_NOREC,
-                 "投放时这道题没有出出来，全列 99，保留列作占位等重投回填")]
-    if h in OPEN_ALSO:
-        out = [(qno_of(h), FORM_OPEN, "自由文本",
-                "受访者手写的文字，不编码；有文本的格数见《变量映射》")]
-        for c in (NA_SKIP, NA_NOREC):
-            out.append((qno_of(h), FORM_OPEN, c, MISSING_MEAN[c]))
-        return out
-    # 剩下的问卷变量区列都是多选的选项列：没被出示的记 97，没勾的记 0
-    return [(qno_of(h), FORM_DUMMY, c,
-             {"0": "未勾选", "1": "勾选了这一项"}.get(c, MISSING_MEAN.get(c, c)))
-            for c in ("0", "1", NA_SKIP)]
+            L.append("%s = %s" % (c, back[c] if c not in NA_ALL else MISSING_MEAN[c]))
+        L.append("")
+        return L, set(cols)
+
+    if opens and not opts:         # 只有开放题的题（Q9）
+        L.append("填空（开放题），%s。变量 %s，写的是自由文本，缺失用通用码。"
+                 % (Q_GATE.get(q, "全卷作答"), "、".join("`%s`" % h for h in opens)))
+        L.append("")
+        return L, set(cols)
+
+    if q == "Q22":                 # 矩阵：行标记 + 评分列
+        flags = [h for h in cols if h.startswith("IDP53__")]
+        rates = [h for h in cols if h.startswith("IDP54/")]
+        L.append("矩阵，%s。%d 款游戏各一行，每行 %d 条说法，共 %d 个评分格。"
+                 % (Q_GATE.get(q, ""), len(flags), len(rates) // max(len(flags), 1), len(rates)))
+        L.append("")
+        L.append("行标记（1＝Q3 勾过这款、要给它打分；0＝没勾，这一行不给他看）：")
+        L.append("")
+        for h in flags:
+            L.append("- `%s` = %s" % (h, label_opt(h)))
+        L.append("")
+        L.append("八条说法，每款游戏各一列：")
+        L.append("")
+        for s in range(1, 9):
+            t = TEXTS.get("IDP54/L469__%d" % s, "")
+            L.append("%d. %s" % (s, short(t.split(" - ", 1)[1]) if " - " in t else ""))
+        L.append("")
+        L.append("评分列的列名是 `IDP54/L{468+行序}__{说法号}`，例如第 1 款游戏第 3 条说法是 "
+                 "`IDP54/L469__3`，第 17 款游戏第 8 条是 `IDP54/L485__8`。取值用通用码："
+                 "1＝选了这条说法、0＝没选、97＝不适用。")
+        L.append("")
+        return L, set(cols)
+
+    # 其余是多选：一项一列，取值用通用码
+    L.append("多选，共 %d 个选项列，%s。" % (len(opts), Q_GATE.get(q, "全卷作答")))
+    L.append("")
+    L.append("每一列取值用通用码：1＝选了下面这一项、0＝没选、97＝本题对他不适用。")
+    L.append("")
+    for h in opts:
+        L.append("- `%s` = %s" % (h, label_opt(h)))
+    for h in opens:
+        L.append("- `%s` = %s（自由文本；没写记 99）" % (h, label_opt(h)))
+    L.append("")
+    return L, set(cols)
 
 
-def build_code_markdown():
-    # 出值码表：一行一个（变量 × 码），数据集里的每一列都在里面有行。
-    rows = []
-    for i, h in enumerate(HEAD):
-        lab = label_of(h)
-        for qno, form, code, mean in code_rows_of(h):
-            rows.append([i + 1, h, lab, qno, form, code, mean])
+def build_code_table():
+    # 出值码表：返回 (markdown 文本, 覆盖到的列名集合)。
     L = ["# 值码表",
          "",
          "由 `092601_cleaning.py` 生成，随 `RPG.csv` 一起走。数据改了要重跑脚本重出，别手工改这张表。",
-         "数据集里的每一列在下面都有行，一行一个码。「值码」列的是该变量的定义码，",
-         "不表示每个码都有人选；每个码实际占多少格见《变量映射》。",
+         "下面按问卷的题目排，读起来就是一张附在问卷上的码表；数据集里的 %d 列在这个文件里都有落点。"
+         % len(HEAD),
          "",
-         "## 缺失码",
+         "## 通用码",
          "",
-         "| 码 | UKDS 的语义 | 本数据里的用法 |",
-         "| --- | --- | --- |",
-         "| 97 | not applicable (skipped) | 跳转未出示、门槛过滤，以及清洗时事后作废的作答 |",
-         "| 98 | not provided (no answer) | 明确表示不愿回答／不便回答（问卷印的「回答したくない」「回答しない」） |",
-         "| 99 | not recorded | 无可用记录：整题无数据、开放题没有文本、性别落不进二值的「その他」 |",
-         "| 0／1 | — | 多选哑变量的两个取值，不是缺失码 |",
-         "| 95／96 | error／not known | 本数据不用 |",
-         "",
-         "## 逐变量值码",
-         "",
-         "| 序 | 变量名 | 变量标签 | 题号 | 形态 | 值码 | 该码的含义 |",
-         "| --- | --- | --- | --- | --- | --- | --- |"]
-    for r in rows:
-        L.append("| " + " | ".join(str(x).replace("|", "｜") for x in r) + " |")
-    return "\n".join(L) + "\n", rows
+         "| 码 | 含义 | 用在哪儿 |",
+         "| --- | --- | --- |"]
+    for c, mean, where in COMMON:
+        L.append("| %s | %s | %s |" % (c, mean, where))
+    L += ["",
+          "两处例外：性别（S4）的 0 与 1 是两个取值本身（0＝男性、1＝女性），不是「没选／选中」；"
+          "派生的 `branch` 用 1 与 2 表示两条腿，取值写在文末。",
+          "单选与有序题的码（1、2、3……）逐题列在下面。",
+          "",
+          "---",
+          ""]
+    covered = set()
+    for mod, qs in QUESTION_ORDER:
+        L.append("## %s" % mod)
+        L.append("")
+        for q in qs:
+            block, cols = question_block(q)
+            L += block
+            covered |= cols
+    L += ["---", "",
+          "## 标识与派生变量",
+          "",
+          "- `ID`：1–%d，受访者序号，等于文件内行序；用来 join 与按人聚类" % N,
+          "- `iirepSerial`：平台序列号，%d 个唯一值，不编码；用来向平台回溯" % N,
+          "- `is_mmorpg`：1＝MMORPG 玩家（S1 或 S2 勾了 MMORPG）、0＝都不是；Q18 至 Q27 的门槛",
+          "- `branch`：1＝主支（走 Q5 至 Q8，只问自报的那一款）、2＝支线（走 Q9 至 Q12，问笼统的最常玩游戏）",
+          "- `elig_q4`：1＝该答 Q4 与 Q22（Q3 勾过至少一款）、0＝不该答",
+          ""]
+    covered |= {"ID", "iirepSerial", "is_mmorpg", "branch", "elig_q4"}
+    return "\n".join(L) + "\n", covered
 
 
 # =============================================================== 7 自检
@@ -695,7 +775,8 @@ need(len(set(r[P["iirepSerial"]] for r in BODY)) == 600, "iirepSerial 不是 600
 need(HEAD[:5] == ["ID", "QUOTAGERANGE", "GENDER_NonBinary", "JPSTDREGION", "SCREENER1__1"],
      "前五列与预期不符：%s" % HEAD[:5])
 need(HEAD[-3:] == NEW, "末三列应为新增标记：%s" % HEAD[-3:])
-missing_code = [h for h in HEAD if not code_rows_of(h)]
+_md, COVER = build_code_table()
+missing_code = [h for h in HEAD if h not in COVER]
 need(not missing_code, "值码表漏了这些列：%s" % missing_code[:10])
 
 fmt = "%-5s %-16s %7s %8s %7s  %s"
@@ -753,7 +834,7 @@ section("七、产出")
 check_lines = []
 if CHECK_ONLY:
     # 漂移比对：把这次算出来的表与磁盘上现有的产物逐格比，只看不写。
-    CODE_MD, _rows = build_code_markdown()
+    CODE_MD, _cover = build_code_table()
     for path, kind, head, rows in ((DST, "csv", HEAD, BODY),
                                    (DEN_OUT, "csv", den_rows[0], den_rows[1:]),
                                    (CODES_OUT, "md", None, CODE_MD.splitlines())):
@@ -800,10 +881,11 @@ with io.open(DST, "w", encoding="utf-8-sig", newline="") as fh:
     w = csv.writer(fh)
     w.writerow(HEAD)
     w.writerows(BODY)
-CODE_MD, CODE_ROWS = build_code_markdown()
+CODE_MD, COVER = build_code_table()
 with io.open(CODES_OUT, "w", encoding="utf-8") as fh:
     fh.write(CODE_MD)
-say("值码表：%d 行，覆盖数据集里全部 %d 列（markdown）。" % (len(CODE_ROWS), len(HEAD)))
+say("值码表：%d 行，按 %d 道题排，覆盖数据集里全部 %d 列（markdown）。"
+    % (CODE_MD.count("\n"), sum(len(qs) for _, qs in QUESTION_ORDER), len(COVER)))
 with io.open(DEN_OUT, "w", encoding="utf-8-sig", newline="") as fh:
     csv.writer(fh).writerows(den_rows)
 with io.open(LOG_OUT, "w", encoding="utf-8") as fh:
