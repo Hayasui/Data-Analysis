@@ -553,13 +553,13 @@ add(B6, "RO 漏斗", "RO 三层的同基数转化", "折全卷 Q4", "把还在�
 add(B6, "口径差", "两个口径", "Q4 有勾选", "当前还在玩至少一款 MMORPG（Q4 勾了至少一款）", N,
     len(Q4_PICK), "「玩过」是 Q3 的口径（293 人），「还在玩」是这一行")
 
-# RO 在玩者自报的主玩款：61 人全部属于在玩组，Q5 都有作答
+# RO 在玩者自报的主玩的游戏：61 人全部属于在玩组，Q5 都有作答
 ro_main = [k for k in q4_ro if COL["IDP52"][k] not in NA]
 for c, n in collections.Counter(int(COL["IDP52"][k]) for k in ro_main).most_common():
-    add(B6, "RO 漏斗", "RO 在玩者自报的主玩款（61 人）", "IDP52", "Q5 = %s" % GAMES[c - 1],
+    add(B6, "RO 漏斗", "RO 在玩者自报的主玩的游戏（61 人）", "IDP52", "Q5 = %s" % GAMES[c - 1],
         len(ro_main), n, "这 61 人全部属于在玩组，所以 Q5 都有作答")
-add(B6, "RO 漏斗", "RO 在玩者自报的主玩款（61 人）", "IDP52 汇总",
-    "其中主玩款就是 RO 系四款之一的", len(ro_main),
+add(B6, "RO 漏斗", "RO 在玩者自报的主玩的游戏（61 人）", "IDP52 汇总",
+    "其中主玩的游戏就是 RO 系四款之一的", len(ro_main),
     sum(1 for k in ro_main if int(COL["IDP52"][k]) in RO_G),
     "其余把 RO 当副线，主玩的是别的 MMORPG")
 
@@ -631,7 +631,7 @@ def cross_single(block, q, var, groups, title, note):
                 pctv="—" if small else None, mev="—" if small else None)
 
 
-# ---- 第 1 组：Q18 至 Q20 按在玩组自报的主玩款分三块，再加不在玩组的 95 人
+# ---- 第 1 组：Q18 至 Q20 按在玩组自报的主玩的游戏分三块，再加不在玩组的 95 人
 RO_STR = {str(c) for c in RO_G}
 G1_FF14 = {k for k in Q4_PICK if COL["IDP52"][k] == "1"}
 G1_RO = {k for k in Q4_PICK if COL["IDP52"][k] in RO_STR}
@@ -640,14 +640,14 @@ G1_NONE = PLAY - Q4_PICK
 need(len(G1_FF14) == 126 and len(G1_RO) == 21 and len(G1_OTH) == 51 and len(G1_NONE) == 95,
      "第 1 组的四块应为 126／21／51／95，实测 %d／%d／%d／%d"
      % (len(G1_FF14), len(G1_RO), len(G1_OTH), len(G1_NONE)))
-G1 = [("主玩款《最终幻想14》", G1_FF14, "Q5 选的是ファイナルファンタジーXIV"),
-      ("主玩款 RO 系四款", G1_RO, "Q5 选的是 RO 系四款之一"),
-      ("主玩款清单内其余十二款", G1_OTH, "Q5 选的是另外十二款之一，实际有人选的只有九款"),
-      ("无清单内主玩款", G1_NONE, "Q4 一款都没勾，主玩款走 Q9 自由填写")]
+G1 = [("主玩的游戏是《最终幻想14》", G1_FF14, "Q5 选的是ファイナルファンタジーXIV"),
+      ("主玩的游戏是 RO 系四款", G1_RO, "Q5 选的是 RO 系四款之一"),
+      ("主玩的游戏是清单内其余十二款", G1_OTH, "Q5 选的是另外十二款之一，实际有人选的只有九款"),
+      ("没有在玩的清单内游戏", G1_NONE, "Q4 一款都没勾，主玩的游戏走 Q9 自由填写")]
 cross_group(B7, "第 1 组", "第 1 组　分组与人数（基数＝Q18 至 Q20 的门槛 293 人）", G1,
             "四块合起来就是 Q18 至 Q20 的 293 人", base=len(PLAY))
 for q, pre in [("Q18", "IDP46"), ("Q19", "IDP47"), ("Q20", "IDP48")]:
-    cross_multi(B7, q, pre, G1, "第 1 组　%s 按自报的主玩款分组" % q,
+    cross_multi(B7, q, pre, G1, "第 1 组　%s 按自报的主玩的游戏分组" % q,
                 "组内一行一个选项；基数只算这一组的人")
 
 # ---- 第 2 组：Q26 与 Q27 按 Q37 的娱乐预算分四档（七档并成四档，最少的档只有 8 人）
@@ -696,10 +696,10 @@ for h in order30:
             "%s（%s）　%s" % (gname, why, opt(h)), len(gset), len(yes(h) & gset),
             "行为层与自认层交叉后的四块；只进 分析表.csv，不进 markdown", md=False)
 
-# ---- 第 4 组：Q23 社交方式按有没有在玩的清单内主玩款分组
-G4 = [(IN_PLAY, Q4_PICK, "有在玩的清单内主玩款，答过 Q5"),
-      (OUT_PLAY, PLAY - Q4_PICK, "没有在玩的清单内主玩款，答的是 Q9")]
-cross_single(B7, "Q23", "IDP55", G4, "第 4 组　Q23 社交方式按是否有在玩的清单内主玩款分组",
+# ---- 第 4 组：Q23 社交方式按有没有在玩的清单内游戏分组
+G4 = [(IN_PLAY, Q4_PICK, "有在玩的清单内游戏，答过 Q5"),
+      (OUT_PLAY, PLAY - Q4_PICK, "没有在玩的清单内游戏，答的是 Q9")]
+cross_single(B7, "Q23", "IDP55", G4, "第 4 组　Q23 社交方式按是否有在玩的清单内游戏分组",
              "Q23 是单选题，四类互斥；两组合起来是门槛内的 293 人")
 
 say("")
