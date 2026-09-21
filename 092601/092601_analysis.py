@@ -10,7 +10,8 @@
           分母按各题清洗后的有效 N（不含 97／98／99），Q8／Q12／Q29／Q37 不再扣 98——
           文件里的 N 已经是扣完 98 的数。
   第三段  三块要单算的东西：Q22 的逐款并排与跨款配对（含 McNemar 精确检验）、
-          两种口径的差（is_mmorpg 与 play_mmorpg，52 与 67 人）、Q9 的 381 条自由文本。
+          两种口径的差（复核前的自我标签 is_mmorpg 与复核后的 is_mmorpg_adj、行为口径
+          play_mmorpg）、Q9 的 381 条自由文本。
 
 每个比例后面跟一个 ME（margin of error，误差幅度，95% 置信区间的半宽），
 按正态近似 1.96×√(p(1−p)/n) 算，单位是百分点。N 小的时候 ME 会很大，
@@ -181,9 +182,9 @@ def need(cond, msg):
 
 
 need(N == 579, "行数应为 579（600 人剔除 21 人），实测 %d" % N)
-need(len(HEAD) == 427, "列数应为 427，实测 %d" % len(HEAD))
-need(HEAD[-4:] == ["is_mmorpg", "play_mmorpg", "not_mmo_mostplay", "nested_ok"],
-     "末四列不是四个派生标记：%s" % HEAD[-4:])
+need(len(HEAD) == 428, "列数应为 428，实测 %d" % len(HEAD))
+need(HEAD[-5:] == ["is_mmorpg", "is_mmorpg_adj", "play_mmorpg", "not_mmo_mostplay", "nested_ok"],
+     "末五列不是五个派生标记：%s" % HEAD[-5:])
 need("ID" in P and "iirepSerial" in P, "缺 ID 或 iirepSerial，这不像清洗脚本产出的文件")
 
 COL = {h: [r[P[h]] for r in BODY] for h in HEAD}
@@ -251,12 +252,18 @@ for s in range(1, 9):
 # ---- 三个派生标记与两个口径
 PLAY = yes("play_mmorpg")
 IS_MMO = yes("is_mmorpg")
+IS_MMO_ADJ = yes("is_mmorpg_adj")           # 复核后的自认口径，报告里的对照维度用这一列
+PAN_RPG = IS_MMO - IS_MMO_ADJ               # 被复核推翻、归入泛 RPG 玩家的 36 人
 NOT_MAIN = yes("not_mmo_mostplay")          # 1 = 走 Q9 至 Q12 那条分支
 NESTED = yes("nested_ok")
 Q4_PICK = {k for k in range(N) if any(COL["IDP51__%d" % g][k] == "1" for g in range(1, 18))}
 Q3_PICK = {k for k in range(N) if any(COL["IDP50__%d" % g][k] == "1" for g in range(1, 18))}
 need(len(PLAY) == 293, "play_mmorpg=1 应为 293，实测 %d" % len(PLAY))
 need(len(IS_MMO) == 278, "is_mmorpg=1 应为 278，实测 %d" % len(IS_MMO))
+need(len(IS_MMO_ADJ) == 242, "is_mmorpg_adj=1 应为 242，实测 %d" % len(IS_MMO_ADJ))
+need(len(PAN_RPG) == 36, "复核移出应为 36 人，实测 %d" % len(PAN_RPG))
+need(len(IS_MMO_ADJ - PLAY) == 16,
+     "复核后仍有 16 人自认却没玩过清单里的任何一款，实测 %d" % len(IS_MMO_ADJ - PLAY))
 need(Q3_PICK == PLAY, "play_mmorpg 与 Q3 的勾选不是同一批人")
 need(Q4_PICK == yes("IDP51__1") or len(Q4_PICK) == 198,
      "Q4 勾到至少一款的应为 198，实测 %d" % len(Q4_PICK))
@@ -503,27 +510,38 @@ multi(B5, "Q35", "IDP67", note="全卷")
 for h in [c for c in HEAD if c.startswith("SCREENER3__")]:
     b = len(valid(h))
     add(B5, "S3×is_mmorpg", "设备与两种口径", h, "%s（全卷）" % opt(h), b, len(yes(h)), "")
-    add(B5, "S3×is_mmorpg", "设备与两种口径", h, "%s（is_mmorpg=1，%d 人）" % (opt(h), len(IS_MMO)),
-        len(IS_MMO), len(yes(h) & IS_MMO), "对照维度，不做门槛")
+    add(B5, "S3×is_mmorpg", "设备与两种口径", h,
+        "%s（自认层复核后 %d 人）" % (opt(h), len(IS_MMO_ADJ)),
+        len(IS_MMO_ADJ), len(yes(h) & IS_MMO_ADJ), "对照维度，不做门槛")
     add(B5, "S3×is_mmorpg", "设备与两种口径", h, "%s（play_mmorpg=1，%d 人）" % (opt(h), len(PLAY)),
         len(PLAY), len(yes(h) & PLAY), "门槛口径")
 
 say("")
 say("—— 附：两个口径的差、RO 漏斗、Q9 文本 ——")
-add(B6, "口径差", "两个口径", "is_mmorpg", "自我标签：S1 或 S2 勾了 MMORPG 品类", N,
-    len(IS_MMO), "只作对照维度，不再做门槛")
+add(B6, "口径差", "两个口径", "is_mmorpg", "原始自我标签：S1 或 S2 勾了 MMORPG 品类", N,
+    len(IS_MMO), "保留原值；报告里的对照维度用下面那一列")
+add(B6, "口径差", "两个口径", "is_mmorpg_adj", "复核后自认 MMORPG：标签未被 Q9 自由填写推翻", N,
+    len(IS_MMO_ADJ), "复核移出 %d 人（写明确的非 MMORPG 的 34 人、写「没在玩」的 2 人），"
+    "归入泛 RPG 玩家；报告里的「自认层」指这一行" % len(PAN_RPG))
 add(B6, "口径差", "两个口径", "play_mmorpg", "行为：在 Q3 的 17 款里玩过至少一款", N,
     len(PLAY), "Q3 至 Q8 与 Q18 至 Q27 的分母")
-add(B6, "口径差", "两个口径", "play−is", "自认品类却一款都没玩过（is=1 且 play=0）", N,
-    len(IS_MMO - PLAY), "清单对日本 MMORPG 大盘的覆盖度之一：这些人不在任何一款的射程内")
+add(B6, "口径差", "两个口径", "is_adj−play", "复核后自认却没在清单里玩过任何一款（is_adj=1 且 play=0）", N,
+    len(IS_MMO_ADJ - PLAY), "清单对日本 MMORPG 大盘的覆盖度：写的是清单外的作品，"
+    "勇者斗恶龙X 系、黑色沙漠、Warframe 都在其中")
+add(B6, "口径差", "两个口径", "play−is", "自认品类却一款都没玩过（原始标签 is=1 且 play=0）", N,
+    len(IS_MMO - PLAY), "复核前的错位人数；报告引的是上面那一行")
 add(B6, "口径差", "两个口径", "is−play", "玩过却没把 MMORPG 算作自己玩的品类（play=1 且 is=0）", N,
     len(PLAY - IS_MMO), "每一个都勾了 S1 的 RPG；他们答过 Q18 至 Q27 的门槛题")
 ESC2 = yes("IDP30__19")
 ESC3 = yes("IDP50__18")
 add(B6, "口径差", "两个口径", "play−is 的构成",
-    "选了 Q3「一款都没玩过」的 %d 人" % len((IS_MMO - PLAY) & ESC3), N,
-    len((IS_MMO - PLAY) & ESC3), "另外 %d 人走的是 Q2 的「以上都没听过」"
-    % len((IS_MMO - PLAY) & ESC2))
+    "选了 Q3「一款都没玩过」的 %d 人；走 Q2「以上都没听过」的 %d 人"
+    % (len((IS_MMO - PLAY) & ESC3), len((IS_MMO - PLAY) & ESC2)), N,
+    len(IS_MMO - PLAY), "原始标签口径下的 52 人怎么来的")
+add(B6, "口径差", "两个口径", "is_adj−play 的构成",
+    "选了 Q3「一款都没玩过」的 %d 人；走 Q2「以上都没听过」的 %d 人"
+    % (len((IS_MMO_ADJ - PLAY) & ESC3), len((IS_MMO_ADJ - PLAY) & ESC2)), N,
+    len(IS_MMO_ADJ - PLAY), "复核后剩下的 16 人；这批人才是清单缺口的证据")
 # RO 漏斗
 q2_ro = {k for k in range(N) if any(COL["IDP30__%d" % g][k] == "1" for g in RO_G)}
 q3_ro = {k for k in range(N) if any(COL["IDP50__%d" % g][k] == "1" for g in RO_G)}
@@ -671,10 +689,10 @@ for q, pre in [("Q26", "IDP58"), ("Q27", "IDP59")]:
 # ---- 第 3 组：Q30 按 MMORPG 行为层分组，另附行为层与自认层的四格（只进分析表.csv）
 G3 = [("MMORPG 行为层", PLAY, "在 Q3 的 17 款里玩过至少一款"),
       ("不在行为层的受访者", set(range(N)) - PLAY, "17 款里一款都没玩过")]
-G3B = [("行为层且自认", PLAY & IS_MMO, "两个口径都命中"),
-       ("行为层但不自认", PLAY - IS_MMO, "玩过却没把 MMORPG 算作自己玩的品类"),
-       ("不在行为层但自认", IS_MMO - PLAY, "自认品类却没玩过清单里的任何一款"),
-       ("两层都不是", set(range(N)) - PLAY - IS_MMO, "两个口径都没命中")]
+G3B = [("行为层且自认", PLAY & IS_MMO_ADJ, "两个口径都命中"),
+       ("行为层但不自认", PLAY - IS_MMO_ADJ, "玩过却没把 MMORPG 算作自己玩的品类"),
+       ("不在行为层但自认", IS_MMO_ADJ - PLAY, "复核后仍自认，却没玩过清单里的任何一款"),
+       ("两层都不是", set(range(N)) - PLAY - IS_MMO_ADJ, "两个口径都没命中")]
 cross_group(B7, "第 3 组", "第 3 组　分组与人数（基数＝全卷 579 人）", G3,
             "两组互斥，合起来是全卷", base=N)
 T3 = "第 3 组　Q30 获取游戏信息的渠道按 MMORPG 分层分组"
@@ -715,6 +733,7 @@ for k in range(N):
     if t in NA:
         continue
     Q9_ROWS.append([BODY[k][P["ID"]], t, BODY[k][P["play_mmorpg"]], BODY[k][P["is_mmorpg"]],
+                    BODY[k][P["is_mmorpg_adj"]],
                     "1" if k in LAPSED else "0", "1" if k in LAPSED_Q9 else "0"])
 say("")
 say("Q9 自由文本：有文本的 %d 条，其中 %d 条是「玩过 RO、已不再玩 RO」的人写的，"
@@ -809,7 +828,8 @@ def md_lines():
 section("四、产出")
 A_MD, md_n = md_lines()
 A_CSV = csv_rows()
-A_Q9 = [["ID", "Q9原文", "play_mmorpg", "is_mmorpg", "玩过RO已不玩RO", "其中属于不在玩组"]] + Q9_ROWS
+A_Q9 = [["ID", "Q9原文", "play_mmorpg", "is_mmorpg", "is_mmorpg_adj", "玩过RO已不玩RO",
+         "其中属于不在玩组"]] + Q9_ROWS
 say("读数 %d 行；分析表.csv %d 行；分析结果.md 折成 %d 张表；Q9文本.csv %d 行。"
     % (len(R), len(A_CSV), md_n, len(A_Q9)))
 

@@ -9,7 +9,7 @@
   第三段  文本型分类变量编成数字，缺失码按 UKDS 的口径按原因拆开。
 
 输入  data/Original.csv    600 行 × 438 列，前两行都是表头（第一行变量名，第二行题目与选项正文）
-输出  data/RPG.csv         579 行 × 427 列（剔除 21 人后；见下「剔除」一段）
+输出  data/RPG.csv         579 行 × 428 列（剔除 21 人后；见下「剔除」一段）
       data/值码表.md        数据集里每一列的值码，markdown（见第五段末尾的构造器）
       data/各题分母.csv     逐题清洗后的有效 N、MMORPG 人数、三种缺失码的处数
       data/清洗日志.txt     每一步动了什么、动了多少处
@@ -31,6 +31,12 @@ Q9 那 2 名异常人在开放填空上的作废作答由 99 改记 97。
 
 2026-09-21 后补：删掉 branch（1＝在玩组／2＝不在玩组）。它与 not_mmo_mostplay 逐行相同，两列里留一个
 名字更好用的；列数因此从 428 变成 427。在玩组与不在玩组各有多少人，仍可从 Q5 与 Q9 的有效 N 读出。
+
+2026-09-21 夜补：自我标签口径加一列复核版 is_mmorpg_adj。自认 MMORPG 品类却在清单里一款都没玩过的
+有 52 人，按 Q9 自由填写分五档：写的是清单外的在线多人世界作品（勇者斗恶龙X 系、黑色沙漠、Warframe）
+的 7 人、只写「ドラクエ」不含款号的 2 人、写的是手游的 7 人，共 16 人留在自认层；写的是明确的非
+MMORPG 的 34 人、写「没在玩」的 2 人，共 36 人按用户裁定归入泛 RPG 玩家、移出自认层。原始标签
+is_mmorpg 保留不动，报告里的对照维度改用 is_mmorpg_adj（242 人）。列数 427 → 428。
 """
 import csv
 import io
@@ -227,6 +233,37 @@ IS_MMO = S1_MMO | S2_MMO                      # 并集：S1 或 S2 任一处勾�
 # 有人玩过 FF14 却不把「MMORPG」这个品类算在自己头上，也有人自认 MMORPG 却一款都没玩过。
 PLAY_MMO = {k for k in range(N)
             if any(RAW[k][RAW_IDX["IDP50__%d" % g]] == "Yes" for g in range(1, 18))}
+# is_mmorpg_adj：自我标签口径的复核版（2026-09-21 用户裁定）。
+# 自认 MMORPG 品类却没在清单里玩过任何一款的有 52 人，看 Q9 自由填写分五档：
+#   A 清单外的在线多人世界作品（留）：勇者斗恶龙X 系 4 人（1 人拼写错成「ドラコンクエストX」）、
+#    黑色沙漠 1 人、Warframe 2 人
+#   B 指向不明（留）：只写「ドラクエ」不含款号的 2 人。同一句话两个人同判，不因谁在 S1、
+#    谁在 S2 勾的 MMORPG 而分开
+#   C 写的是手游（留，保守口径）：原神 2、放置少女 2、白猫、グラブル、ゼンゼロ 各 1。
+#    严格看这几款也不是 MMORPG；要一并移出，把这里的档号改成 D 即可
+#   D 明确非 MMORPG（移）：单机 RPG、动作、射击、卡牌、消除、体育、竞速、沙盒一类
+#   E 没在玩（移）：Q9 写「なし」「プレイしていない」
+# D 与 E 共 36 人移出，自认层从 278 收到 242。逐人的 Q9 原文与归类打印在清洗日志里。
+GAP52_TAG = {
+    # A 清单外的在线多人世界作品（7 人，留）
+    70: "A", 310: "A", 383: "A", 444: "A", 392: "A", 523: "A", 563: "A",
+    # B 只写「ドラクエ」不含款号（2 人，留）
+    340: "B", 540: "B",
+    # C 手游（7 人，留）
+    54: "C", 281: "C", 291: "C", 298: "C", 422: "C", 446: "C", 457: "C",
+    # D 明确非 MMORPG（34 人，移出）
+    40: "D", 53: "D", 62: "D", 74: "D", 77: "D", 81: "D", 90: "D", 92: "D", 105: "D",
+    114: "D", 115: "D", 127: "D", 154: "D", 177: "D", 241: "D", 243: "D", 313: "D",
+    314: "D", 323: "D", 329: "D", 337: "D", 358: "D", 366: "D", 377: "D", 401: "D",
+    406: "D", 416: "D", 498: "D", 502: "D", 520: "D", 526: "D", 537: "D", 570: "D",
+    586: "D",
+    # E 没在玩（2 人，移出）
+    253: "E", 431: "E",
+}
+GAP52_MOVE_ID = sorted(i for i, t in GAP52_TAG.items() if t in ("D", "E"))
+GAP52_IDX = {ORIG_ID.index(i) for i in GAP52_TAG}
+GAP52_MOVE = {ORIG_ID.index(i) for i in GAP52_MOVE_ID}
+IS_MMO_ADJ = IS_MMO - GAP52_MOVE
 Q2_ESC = y_raw("IDP30__19")                   # Q2 选「以上都没听过」
 Q3_ESC = y_raw("IDP50__18")                   # Q3 选「一款都没玩过」
 Q4_GAME = ["IDP51__%d" % j for j in range(1, 18)]
@@ -247,6 +284,25 @@ say("  两者差 %d 人：is_mmorpg=1 而 play_mmorpg=0 的 %d 人（自认品�
 say("  play_mmorpg=1 而 is_mmorpg=0 的 %d 人（玩过却没有把 MMORPG 算作自己玩的品类）。"
     % len(PLAY_MMO - IS_MMO))
 say("Q2 逃亡口 = %d 人；Q3 逃亡口 = %d 人。" % (len(Q2_ESC), len(Q3_ESC)))
+say("")
+say("二之一、自认 MMORPG 却在清单里一款都没玩过的 %d 人，按 Q9 自由填写归类"
+    % len(IS_MMO - PLAY_MMO))
+say("  A 清单外的在线多人世界作品（留）：%d 人"
+    % sum(1 for t in GAP52_TAG.values() if t == "A"))
+say("  B 只写「ドラクエ」不含款号（留）：%d 人"
+    % sum(1 for t in GAP52_TAG.values() if t == "B"))
+say("  C 写的是手游（留，保守口径）：%d 人"
+    % sum(1 for t in GAP52_TAG.values() if t == "C"))
+say("  D 明确非 MMORPG（移出，归泛 RPG）：%d 人"
+    % sum(1 for t in GAP52_TAG.values() if t == "D"))
+say("  E 写「没在玩」（移出，归泛 RPG）：%d 人"
+    % sum(1 for t in GAP52_TAG.values() if t == "E"))
+say("  D 与 E 合计 %d 人移出自认层：is_mmorpg=1 的 %d 人 → is_mmorpg_adj=1 的 %d 人。"
+    % (len(GAP52_MOVE), len(IS_MMO), len(IS_MMO_ADJ)))
+say("  逐人明细（原始行号／档／Q9 原文）：")
+for _i in sorted(GAP52_TAG):
+    _k = ORIG_ID.index(_i)
+    say("    %-5d %-2s %s" % (_i, GAP52_TAG[_i], RAW[_k][RAW_IDX["IDP37"]] or "（空）"))
 say("在玩组与不在玩组都答了的异常人 = %d 人（原始行 %s）。"
     % (len(BRANCH_DUP), "、".join(str(ORIG_ID[k]) for k in sorted(BRANCH_DUP))))
 say("nested_ok=1（Q3 的勾选完全落在 Q2 之内）的 %d 人；余下 %d 人有一到两处越界，"
@@ -416,15 +472,22 @@ say("多选哑变量 Yes→1、No→0：共 %d 列。缺失码不动，所以每
 
 for k in range(N):
     WORK[k].append("1" if k in IS_MMO else "0")
+    WORK[k].append("1" if k in IS_MMO_ADJ else "0")
     WORK[k].append("1" if k in PLAY_MMO else "0")
     WORK[k].append("0" if k in Q4_PICK else "1")
     WORK[k].append("1" if k in NESTED_OK else "0")
-NEW = ["is_mmorpg", "play_mmorpg", "not_mmo_mostplay", "nested_ok"]
+NEW = ["is_mmorpg", "is_mmorpg_adj", "play_mmorpg", "not_mmo_mostplay", "nested_ok"]
 say("")
-say("新增四列，供分析直接引用，不占问卷题号：")
+say("新增五列，供分析直接引用，不占问卷题号：")
 say("  is_mmorpg        1 = S1 或 S2 勾了 MMORPG 这个品类（%d 人）／0 = 都不是（%d 人）"
     % (len(IS_MMO), N - len(IS_MMO)))
-say("                   这是「自我标签」口径，用于把两种口径的差写进报告，不再做门槛")
+say("                   原始自我标签，保留原值；口径本身不做门槛")
+say("  is_mmorpg_adj    1 = 自我标签为 MMORPG、且 Q9 复核后未被推翻（%d 人）／0 = 其余（%d 人）"
+    % (len(IS_MMO_ADJ), N - len(IS_MMO_ADJ)))
+say("                   复核移出的 %d 人（明确非 MMORPG 的 %d 人 + 写「没在玩」的 %d 人）归入"
+    % (len(GAP52_MOVE), sum(1 for t in GAP52_TAG.values() if t == "D"),
+       sum(1 for t in GAP52_TAG.values() if t == "E")))
+say("                   泛 RPG 玩家；报告里的「MMORPG 自认层」指这一列，名单见值码表开头")
 say("  play_mmorpg      1 = 在 Q3 的 17 款里玩过至少一款（%d 人）／0 = 一款都没玩过（%d 人）"
     % (len(PLAY_MMO), N - len(PLAY_MMO)))
 say("                   这是「行为」口径；Q3 至 Q8 与 Q18 至 Q27 的分母都用它")
@@ -764,6 +827,24 @@ def build_code_table():
          "**ID 不重排**：取值仍是原始导出的行号，上面那串号码就是序列里缺的那些，任何一个 ID",
          "都能直接对回原始导出的第几行。",
          "",
+         "## 自我标签口径的复核（2026-09-21）",
+         "",
+         "自认 MMORPG 品类（`is_mmorpg`=1）却在 17 款清单里一款都没玩过的有 %d 人。"
+         % len(IS_MMO - PLAY_MMO),
+         "看他们在 Q9 自由填写里报的最常玩的游戏：写的是清单外的在线多人世界作品（勇者斗恶龙X 系、"
+         "黑色沙漠、Warframe）的 %d 人、只写「ドラクエ」不含款号的 %d 人、写的是手游的 %d 人，"
+         % (sum(1 for t in GAP52_TAG.values() if t == "A"),
+            sum(1 for t in GAP52_TAG.values() if t == "B"),
+            sum(1 for t in GAP52_TAG.values() if t == "C")),
+         "共 %d 人留在自认层；**%d 人**写的是明确的非 MMORPG（%d 人）或「没在玩」（%d 人），"
+         % (sum(1 for t in GAP52_TAG.values() if t in "ABC"), len(GAP52_MOVE),
+            sum(1 for t in GAP52_TAG.values() if t == "D"),
+            sum(1 for t in GAP52_TAG.values() if t == "E")),
+         "按用户裁定归入泛 RPG 玩家，从自认层移出。原始标签 `is_mmorpg` 保留原值，报告的对照维度"
+         "改用复核后的 `is_mmorpg_adj`（%d 人）。" % len(IS_MMO_ADJ),
+         "",
+         "移出的原始行号：%s" % "、".join(str(i) for i in GAP52_MOVE_ID),
+         "",
          "## 通用码",
          "",
          "| 码 | 含义 | 用在哪儿 |",
@@ -772,7 +853,8 @@ def build_code_table():
         L.append("| %s | %s | %s |" % (c, mean, where))
     L += ["",
           "一处例外：性别（S4）的 0 与 1 是两个取值本身（0＝男性、1＝女性），不是「没选／选中」。"
-          "四个派生标记（`is_mmorpg`、`play_mmorpg`、`not_mmo_mostplay`、`nested_ok`）都走通用码的 1 与 0。",
+          "五个派生标记（`is_mmorpg`、`is_mmorpg_adj`、`play_mmorpg`、`not_mmo_mostplay`、`nested_ok`）"
+          "都走通用码的 1 与 0。",
           "单选与有序题的码（1、2、3……）逐题列在下面。",
           "",
           "---",
@@ -793,7 +875,11 @@ def build_code_table():
           "- `iirepSerial`：平台序列号，%d 个唯一值，不编码；用来向平台回溯" % N,
           "- `is_mmorpg`：1＝S1 或 S2 勾了 MMORPG 这个品类、0＝都不是（%d／%d）。"
           % (len(IS_MMO), N - len(IS_MMO)),
-          "  自我标签口径，与 `play_mmorpg` 互不包含，用来把两种口径的差写进报告",
+          "  原始自我标签口径，保留原值，与 `play_mmorpg` 互不包含",
+          "- `is_mmorpg_adj`：1＝自我标签为 MMORPG、且 Q9 复核后未被推翻、0＝其余（%d／%d）。"
+          % (len(IS_MMO_ADJ), N - len(IS_MMO_ADJ)),
+          "  报告里说「MMORPG 自认层」时指这一列；移出的 %d 人归入泛 RPG 玩家"
+          % len(GAP52_MOVE),
           "- `play_mmorpg`：1＝在 Q3 的 17 款里玩过至少一款、0＝一款都没玩过（%d／%d）。"
           % (len(PLAY_MMO), N - len(PLAY_MMO)),
           "  行为口径；Q3 至 Q8 与 Q18 至 Q27 的分母都用它",
@@ -823,13 +909,22 @@ need(DROPPED_IDS == [11, 15, 33, 118, 140, 161, 282, 311, 312, 335, 348, 378, 38
                      435, 495, 501, 564, 576, 582, 594],
      "剔除名单与既定名单不符：%s" % DROPPED_IDS)
 need(N == 579, "剔除后行数应为 579，实测 %d" % N)
-need(len(HEAD) == 427, "列数应为 427，实测 %d" % len(HEAD))
+need(len(HEAD) == 428, "列数应为 428，实测 %d" % len(HEAD))
 need(all(len(r) == len(HEAD) for r in BODY), "有行列数不齐")
 need(not [1 for r in BODY for v in r if v == ""], "还留着空白")
 need(len(S1_RPG) == 536, "S1 勾 RPG 应为 536，实测 %d" % len(S1_RPG))
 need(len(S1_MMO) == 210 and len(S2_MMO) == 68, "S1／S2 勾 MMORPG 应为 210／68，实测 %d／%d"
      % (len(S1_MMO), len(S2_MMO)))
 need(len(IS_MMO) == 278, "is_mmorpg=1 应为 278，实测 %d" % len(IS_MMO))
+need(len(GAP52_TAG) == 52, "GAP52 归类表应有 52 人，实测 %d" % len(GAP52_TAG))
+need(GAP52_IDX == IS_MMO - PLAY_MMO, "GAP52 归类表的人与「自认却没玩过」的 52 人不是同一批")
+need(tuple(sum(1 for t in GAP52_TAG.values() if t == c) for c in "ABCDE") == (7, 2, 7, 34, 2),
+     "GAP52 五档人数应为 7／2／7／34／2，实测 %s"
+     % (tuple(sum(1 for t in GAP52_TAG.values() if t == c) for c in "ABCDE"),))
+need(len(IS_MMO_ADJ) == 242, "is_mmorpg_adj=1 应为 242，实测 %d" % len(IS_MMO_ADJ))
+need(IS_MMO_ADJ <= IS_MMO, "复核后的自认层应当是原始自认层的子集")
+need(len(IS_MMO_ADJ - PLAY_MMO) == 16,
+     "复核后仍有 16 人自认却没在清单里玩过任何一款，实测 %d" % len(IS_MMO_ADJ - PLAY_MMO)),
 need(len(PLAY_MMO) == 293, "play_mmorpg=1 应为 293，实测 %d" % len(PLAY_MMO))
 need(len(PLAY_MMO - IS_MMO) == 67 and len(IS_MMO - PLAY_MMO) == 52,
      "两口径之差应为 67／52，实测 %d／%d" % (len(PLAY_MMO - IS_MMO), len(IS_MMO - PLAY_MMO)))
@@ -860,6 +955,8 @@ need({k for k in range(N) if GV("nested_ok", k) == "1"} == NESTED_OK, "nested_ok
 need({k for k in range(N) if GV("not_mmo_mostplay", k) == "1"} == set(range(N)) - Q4_PICK,
      "not_mmo_mostplay 应与「Q4 没勾到游戏」的人逐行相同")
 need({k for k in range(N) if GV("is_mmorpg", k) == "1"} == IS_MMO, "is_mmorpg 与 S1／S2 的勾选对不上")
+need({k for k in range(N) if GV("is_mmorpg_adj", k) == "1"} == IS_MMO_ADJ,
+     "is_mmorpg_adj 与复核后的名单对不上")
 
 # Q4 必须落在 Q3 之内（Q4 的设计前提）；Q3 越界 Q2 的人保留，由 nested_ok 标出
 need(not [1 for k in range(N) for g in range(1, 18)
@@ -903,13 +1000,13 @@ need(not (set(map(int, [r[P["ID"]] for r in BODY])) & set(DROPPED_IDS)), "被剔
 need(len(set(r[P["iirepSerial"]] for r in BODY)) == N, "iirepSerial 不是 %d 个唯一值" % N)
 need(HEAD[:5] == ["ID", "QUOTAGERANGE", "GENDER_NonBinary", "JPSTDREGION", "SCREENER1__1"],
      "前五列与预期不符：%s" % HEAD[:5])
-need(HEAD[-4:] == NEW, "末四列应为新增标记：%s" % HEAD[-4:])
+need(HEAD[-5:] == NEW, "末五列应为新增标记：%s" % HEAD[-5:])
 _md, COVER = build_code_table()
 missing_code = [h for h in HEAD if h not in COVER]
 need(not missing_code, "值码表漏了这些列：%s" % missing_code[:10])
 
-fmt = "%-5s %-16s %7s %9s %9s  %s"
-say(fmt % ("题", "变量", "清洗后N", "is_mmorpg", "play_mmorpg", "缺失码数量"))
+fmt = "%-5s %-16s %7s %9s %12s %9s  %s"
+say(fmt % ("题", "变量", "清洗后N", "is_mmorpg", "is_mmorpg_adj", "play_mmorpg", "缺失码数量"))
 GATES = [
     ("S1", "SCREENER1__1", "全卷"), ("S2", "SCREENER2__1", "仅 S1 勾 RPG"),
     ("S3", "SCREENER3__1", "全卷"), ("Q2", "IDP30__1", "全卷"),
@@ -936,14 +1033,15 @@ GATES = [
     ("Q34", "IDP66__1", "全卷"), ("Q35", "IDP67__1", "全卷"),
     ("Q36", "IDP68", "全卷"), ("Q37", "IDP69", "全卷；报告分母扣掉 98"),
 ]
-den_rows = [["题号", "变量", "清洗后 N", "其中 is_mmorpg", "其中 play_mmorpg", "缺失 97",
-             "缺失 98", "缺失 99", "设计门槛"]]
+den_rows = [["题号", "变量", "清洗后 N", "其中 is_mmorpg", "其中 is_mmorpg_adj", "其中 play_mmorpg",
+             "缺失 97", "缺失 98", "缺失 99", "设计门槛"]]
 for q, h, gate in GATES:
     v = valid(h)
-    say(fmt % (q, h, len(v), len(v & IS_MMO), len(v & PLAY_MMO),
+    say(fmt % (q, h, len(v), len(v & IS_MMO), len(v & IS_MMO_ADJ), len(v & PLAY_MMO),
                "97=%-6d 98=%-4d 99=%d" % (n_of(h, "97"), n_of(h, "98"), n_of(h, "99"))))
-    den_rows.append([q, h, str(len(v)), str(len(v & IS_MMO)), str(len(v & PLAY_MMO)),
-                     str(n_of(h, "97")), str(n_of(h, "98")), str(n_of(h, "99")), gate])
+    den_rows.append([q, h, str(len(v)), str(len(v & IS_MMO)), str(len(v & IS_MMO_ADJ)),
+                     str(len(v & PLAY_MMO)), str(n_of(h, "97")), str(n_of(h, "98")),
+                     str(n_of(h, "99")), gate])
 
 s97 = sum(1 for r in BODY for j, h in enumerate(HEAD) if is_survey(h) and r[j] == "97")
 s98 = sum(1 for r in BODY for j, h in enumerate(HEAD) if is_survey(h) and r[j] == "98")
