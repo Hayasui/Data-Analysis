@@ -29,8 +29,8 @@ Q9 那 2 名异常人在开放填空上的作废作答由 99 改记 97。
 完全不相交的 21 人整人剔除；③ 派生标记：elig_q4 改名 play_mmorpg，新增 not_mmo_mostplay
 与 nested_ok。三个派生标记的定义见第三段。剔除之后 ID 保留原始导出行号，不再连续。
 
-2026-09-21 后补：删掉 branch（1＝主支／2＝支线）。它与 not_mmo_mostplay 逐行相同，两列里留一个
-名字更好用的；列数因此从 428 变成 427。主支与支线各有多少人，仍可从 Q5 与 Q9 的有效 N 读出。
+2026-09-21 后补：删掉 branch（1＝在玩组／2＝不在玩组）。它与 not_mmo_mostplay 逐行相同，两列里留一个
+名字更好用的；列数因此从 428 变成 427。在玩组与不在玩组各有多少人，仍可从 Q5 与 Q9 的有效 N 读出。
 """
 import csv
 import io
@@ -230,7 +230,7 @@ PLAY_MMO = {k for k in range(N)
 Q2_ESC = y_raw("IDP30__19")                   # Q2 选「以上都没听过」
 Q3_ESC = y_raw("IDP50__18")                   # Q3 选「一款都没玩过」
 Q4_GAME = ["IDP51__%d" % j for j in range(1, 18)]
-BRANCH_DUP = filled_raw("IDP52") & filled_raw("IDP37")   # 主支与支线都答了的异常人
+BRANCH_DUP = filled_raw("IDP52") & filled_raw("IDP37")   # 在玩组与不在玩组都答了的异常人
 
 say("原始表 %d 行 × %d 列，剔除 %d 人后 %d 人 × %d 列。" % (SRC_ROWS, len(NAMES),
                                                           len(DROPPED), N, len(NAMES)))
@@ -247,7 +247,7 @@ say("  两者差 %d 人：is_mmorpg=1 而 play_mmorpg=0 的 %d 人（自认品�
 say("  play_mmorpg=1 而 is_mmorpg=0 的 %d 人（玩过却没有把 MMORPG 算作自己玩的品类）。"
     % len(PLAY_MMO - IS_MMO))
 say("Q2 逃亡口 = %d 人；Q3 逃亡口 = %d 人。" % (len(Q2_ESC), len(Q3_ESC)))
-say("主支与支线都答了的异常人 = %d 人（原始行 %s）。"
+say("在玩组与不在玩组都答了的异常人 = %d 人（原始行 %s）。"
     % (len(BRANCH_DUP), "、".join(str(ORIG_ID[k]) for k in sorted(BRANCH_DUP))))
 say("nested_ok=1（Q3 的勾选完全落在 Q2 之内）的 %d 人；余下 %d 人有一到两处越界，"
     % (len(NESTED_OK), N - len(NESTED_OK)))
@@ -285,7 +285,7 @@ say("第二层，Q3 逃亡口的 %d 人在本题的作答全部作废，原有�
     % (len(Q3_ESC), n4_had, n4_blank))
 say("作废的理由：本题的选项集由 Q3 的勾选生成，Q3 说「一款都没玩过」的人没有任何可出示的")
 say("游戏，本题对他们不成立。处理方式是作废作答而不是剔除样本——这 %d 人在 Q3 与 Q9 及之后" % len(Q3_ESC))
-say("的题目上都有有效作答，删人会连带毁掉支线与后段各题的分母。")
+say("的题目上都有有效作答，删人会连带毁掉不在玩组与后段各题的分母。")
 say("清洗后本题有效 = %d 人。IDP51__18 是平台串过来的 Q3 文本，已整项作废，第四段删列。"
     % len(valid("IDP51__1")))
 Q4_PICK = {k for k in range(N) if any(GV(h, k) in ("Yes", "1") for h in Q4_GAME)}
@@ -301,11 +301,11 @@ Q9_COLS = pick("IDP37") + pick("IDP38") + pick("IDP39") + pick("IDP40")
 c = fill_blanks(Q9_COLS)
 n9_had, n9_blank = void(Q9_COLS, BRANCH_DUP)
 say("")
-say("Q9 至 Q12 平行支线（笼统最常玩的那一款）：空白写缺失码（%d 处）；" % sum(c.values()))
-say("那 %d 名异常人在本支线的作答作废，原有作答 %d 处（另有 %d 处本来就是空的），"
+say("Q9 至 Q12 这条平行分支（最常玩的那一款，自由填写）：空白写缺失码（%d 处）；" % sum(c.values()))
+say("那 %d 名异常人在 Q9 至 Q12 的作答作废，原有作答 %d 处（另有 %d 处本来就是空的），"
     % (len(BRANCH_DUP), n9_had, n9_blank))
-say("按问卷流向他们只该走主支；Q9 的开放填空（IDP37）那两处也一并记 97。")
-say("两支恰好覆盖 %d 人：主支 %d ＋ 支线 %d。" % (N, len(valid("IDP52")), len(valid("IDP37"))))
+say("按问卷流向他们只该走 Q5 至 Q8；Q9 的开放填空（IDP37）那两处也一并记 97。")
+say("两组恰好覆盖 %d 人：在玩组 %d ＋ 不在玩组 %d。" % (N, len(valid("IDP52")), len(valid("IDP37"))))
 
 c = fill_blanks(pick("IDP41") + pick("IDP42") + pick("IDP43") + pick("IDP44"))
 say("")
@@ -428,11 +428,11 @@ say("                   这是「自我标签」口径，用于把两种口径�
 say("  play_mmorpg      1 = 在 Q3 的 17 款里玩过至少一款（%d 人）／0 = 一款都没玩过（%d 人）"
     % (len(PLAY_MMO), N - len(PLAY_MMO)))
 say("                   这是「行为」口径；Q3 至 Q8 与 Q18 至 Q27 的分母都用它")
-say("  not_mmo_mostplay 1 = 走支线、报的是笼统的最常玩游戏（%d 人）／0 = 主支（%d 人）"
+say("  not_mmo_mostplay 1 = 走 Q9 至 Q12、报的是自由填写的最常玩游戏（%d 人）／0 = 走 Q5 至 Q8（%d 人）"
     % (N - len(Q4_PICK), len(Q4_PICK)))
 say("                   「没有一款还在玩的 MMORPG 可追问」的人，Q9 至 Q12 的分母")
-say("                   主支与支线原来是 branch 的两个码，2026-09-21 删掉 branch：它与这一列")
-say("                   逐行相同，留一个名字更好用的。主支人数看 Q5 的有效 N，支线看 Q9 的。")
+say("                   在玩组与不在玩组原来是 branch 的两个码，2026-09-21 删掉 branch：它与这一列")
+say("                   逐行相同，留一个名字更好用的。在玩组人数看 Q5 的有效 N，不在玩组看 Q9 的。")
 say("  nested_ok        1 = Q3 的勾选完全落在 Q2 之内（%d 人）／0 = 有一到两处越界（%d 人）"
     % (len(NESTED_OK), N - len(NESTED_OK)))
 say("                   Q4 落在 Q3 之内实测 0 例外，所以这一列只反映 Q2 与 Q3 的差")
@@ -606,7 +606,7 @@ Q_GATE = {
     "Q6": "同 Q5",
     "Q7": "同 Q5",
     "Q8": "同 Q5",
-    "Q9": "三个逃亡口之一；走主支的 %d 人跳过" % len(valid("IDP52")),
+    "Q9": "三个逃亡口之一；走 Q5 至 Q8 的 %d 人跳过" % len(valid("IDP52")),
     "Q10": "同 Q9",
     "Q11": "同 Q9",
     "Q12": "同 Q9",
@@ -797,9 +797,9 @@ def build_code_table():
           "- `play_mmorpg`：1＝在 Q3 的 17 款里玩过至少一款、0＝一款都没玩过（%d／%d）。"
           % (len(PLAY_MMO), N - len(PLAY_MMO)),
           "  行为口径；Q3 至 Q8 与 Q18 至 Q27 的分母都用它",
-          "- `not_mmo_mostplay`：1＝走支线、报的是笼统的最常玩游戏、0＝主支（%d／%d）。"
+          "- `not_mmo_mostplay`：1＝走 Q9 至 Q12、报的是自由填写的最常玩游戏，0＝走 Q5 至 Q8（%d／%d）。"
           % (N - len(Q4_PICK), len(Q4_PICK)),
-          "  Q9 至 Q12 的分母。主支与支线原来是 branch 这一列，2026-09-21 删掉，只留这一列",
+          "  Q9 至 Q12 的分母。在玩组与不在玩组原来是 branch 这一列，2026-09-21 删掉，只留这一列",
           "- `nested_ok`：1＝Q3 的勾选完全落在 Q2 之内、0＝有一到两处越界（%d／%d）"
           % (len(NESTED_OK), N - len(NESTED_OK)),
           ""]
@@ -836,13 +836,13 @@ need(len(PLAY_MMO - IS_MMO) == 67 and len(IS_MMO - PLAY_MMO) == 52,
 need(not (S1_MMO & S2_MMO), "S1 与 S2 的 MMORPG 不应有人重叠")
 need(len(Q2_ESC) == 69, "Q2 逃亡口应为 69，实测 %d" % len(Q2_ESC))
 need(len(Q3_ESC) == 217, "Q3 逃亡口应为 217，实测 %d" % len(Q3_ESC))
-need(len(BRANCH_DUP) == 2, "主支与支线的重叠应为 2 人，实测 %d" % len(BRANCH_DUP))
+need(len(BRANCH_DUP) == 2, "在玩组与不在玩组的重叠应为 2 人，实测 %d" % len(BRANCH_DUP))
 need(len(valid("IDP50__1")) == 510, "Q3 有效应为 510，实测 %d" % len(valid("IDP50__1")))
 need(len(valid("IDP51__1")) == 293, "Q4 有效应为 293（= play_mmorpg=1 的同一批人），实测 %d"
      % len(valid("IDP51__1")))
 need(valid("IDP51__1") == PLAY_MMO, "Q4 的应答题人群与 play_mmorpg=1 不是同一批人")
 need(len(valid("IDP52")) == 198 and len(valid("IDP37")) == 381,
-     "主支／支线应为 198／381，实测 %d／%d" % (len(valid("IDP52")), len(valid("IDP37"))))
+     "在玩组／不在玩组应为 198／381，实测 %d／%d" % (len(valid("IDP52")), len(valid("IDP37"))))
 need(len(valid("IDP43__1")) == 146 and len(valid("IDP44__1")) == 221,
      "Q15／Q16 应为 146／221，实测 %d／%d" % (len(valid("IDP43__1")), len(valid("IDP44__1"))))
 need(len(valid("IDP46__1")) == 293, "Q18 至 Q20、Q26、Q27 的分母应为 293，实测 %d"
