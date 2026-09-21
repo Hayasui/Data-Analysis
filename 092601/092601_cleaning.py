@@ -9,7 +9,7 @@
   第三段  文本型分类变量编成数字，缺失码按 UKDS 的口径按原因拆开。
 
 输入  data/Original.csv    600 行 × 438 列，前两行都是表头（第一行变量名，第二行题目与选项正文）
-输出  data/RPG.csv         579 行 × 428 列（剔除 21 人后；见下「剔除」一段）
+输出  data/RPG.csv         579 行 × 427 列（剔除 21 人后；见下「剔除」一段）
       data/值码表.md        数据集里每一列的值码，markdown（见第五段末尾的构造器）
       data/各题分母.csv     逐题清洗后的有效 N、MMORPG 人数、三种缺失码的处数
       data/清洗日志.txt     每一步动了什么、动了多少处
@@ -28,6 +28,9 @@ Q9 那 2 名异常人在开放填空上的作废作答由 99 改记 97。
 「在这 17 款里玩过至少一款」（play_mmorpg），前一条的置 97 范围随之重算；② Q2 与 Q3 的勾选
 完全不相交的 21 人整人剔除；③ 派生标记：elig_q4 改名 play_mmorpg，新增 not_mmo_mostplay
 与 nested_ok。三个派生标记的定义见第三段。剔除之后 ID 保留原始导出行号，不再连续。
+
+2026-09-21 后补：删掉 branch（1＝主支／2＝支线）。它与 not_mmo_mostplay 逐行相同，两列里留一个
+名字更好用的；列数因此从 428 变成 427。主支与支线各有多少人，仍可从 Q5 与 Q9 的有效 N 读出。
 """
 import csv
 import io
@@ -413,25 +416,23 @@ say("多选哑变量 Yes→1、No→0：共 %d 列。缺失码不动，所以每
 
 for k in range(N):
     WORK[k].append("1" if k in IS_MMO else "0")
-    WORK[k].append("1" if GV("IDP52", k) != NA_SKIP else "2")
     WORK[k].append("1" if k in PLAY_MMO else "0")
     WORK[k].append("0" if k in Q4_PICK else "1")
     WORK[k].append("1" if k in NESTED_OK else "0")
-NEW = ["is_mmorpg", "branch", "play_mmorpg", "not_mmo_mostplay", "nested_ok"]
+NEW = ["is_mmorpg", "play_mmorpg", "not_mmo_mostplay", "nested_ok"]
 say("")
-say("新增五列，供分析直接引用，不占问卷题号：")
+say("新增四列，供分析直接引用，不占问卷题号：")
 say("  is_mmorpg        1 = S1 或 S2 勾了 MMORPG 这个品类（%d 人）／0 = 都不是（%d 人）"
     % (len(IS_MMO), N - len(IS_MMO)))
 say("                   这是「自我标签」口径，用于把两种口径的差写进报告，不再做门槛")
 say("  play_mmorpg      1 = 在 Q3 的 17 款里玩过至少一款（%d 人）／0 = 一款都没玩过（%d 人）"
     % (len(PLAY_MMO), N - len(PLAY_MMO)))
 say("                   这是「行为」口径；Q3 至 Q8 与 Q18 至 Q27 的分母都用它")
-say("  branch           1 = 主支走 Q5 至 Q8（%d 人）／2 = 支线走 Q9 至 Q12（%d 人）"
-    % (len(valid("IDP52")), len(valid("IDP37"))))
 say("  not_mmo_mostplay 1 = 走支线、报的是笼统的最常玩游戏（%d 人）／0 = 主支（%d 人）"
     % (N - len(Q4_PICK), len(Q4_PICK)))
 say("                   「没有一款还在玩的 MMORPG 可追问」的人，Q9 至 Q12 的分母")
-say("                   ⚠️ 它与 branch=2 逐行相同，是同一批人换了名字，留着方便读")
+say("                   主支与支线原来是 branch 的两个码，2026-09-21 删掉 branch：它与这一列")
+say("                   逐行相同，留一个名字更好用的。主支人数看 Q5 的有效 N，支线看 Q9 的。")
 say("  nested_ok        1 = Q3 的勾选完全落在 Q2 之内（%d 人）／0 = 有一到两处越界（%d 人）"
     % (len(NESTED_OK), N - len(NESTED_OK)))
 say("                   Q4 落在 Q3 之内实测 0 例外，所以这一列只反映 Q2 与 Q3 的差")
@@ -770,9 +771,8 @@ def build_code_table():
     for c, mean, where in COMMON:
         L.append("| %s | %s | %s |" % (c, mean, where))
     L += ["",
-          "两处例外：性别（S4）的 0 与 1 是两个取值本身（0＝男性、1＝女性），不是「没选／选中」；"
-          "派生的 `branch` 用 1 与 2 表示两条腿，取值写在文末。其余四个派生标记"
-          "（`is_mmorpg`、`play_mmorpg`、`not_mmo_mostplay`、`nested_ok`）都走通用码的 1 与 0。",
+          "一处例外：性别（S4）的 0 与 1 是两个取值本身（0＝男性、1＝女性），不是「没选／选中」。"
+          "四个派生标记（`is_mmorpg`、`play_mmorpg`、`not_mmo_mostplay`、`nested_ok`）都走通用码的 1 与 0。",
           "单选与有序题的码（1、2、3……）逐题列在下面。",
           "",
           "---",
@@ -794,15 +794,12 @@ def build_code_table():
           "- `is_mmorpg`：1＝S1 或 S2 勾了 MMORPG 这个品类、0＝都不是（%d／%d）。"
           % (len(IS_MMO), N - len(IS_MMO)),
           "  自我标签口径，与 `play_mmorpg` 互不包含，用来把两种口径的差写进报告",
-          "- `branch`：1＝主支（走 Q5 至 Q8，只问自报的那一款，%d 人）、2＝支线（走 Q9 至 Q12，"
-          % len(valid("IDP52")),
-          "  问笼统的最常玩游戏，%d 人）" % len(valid("IDP37")),
           "- `play_mmorpg`：1＝在 Q3 的 17 款里玩过至少一款、0＝一款都没玩过（%d／%d）。"
           % (len(PLAY_MMO), N - len(PLAY_MMO)),
           "  行为口径；Q3 至 Q8 与 Q18 至 Q27 的分母都用它",
           "- `not_mmo_mostplay`：1＝走支线、报的是笼统的最常玩游戏、0＝主支（%d／%d）。"
           % (N - len(Q4_PICK), len(Q4_PICK)),
-          "  Q9 至 Q12 的分母。⚠️ 与 `branch=2` 逐行相同，是同一批人，换个名字便于读表",
+          "  Q9 至 Q12 的分母。主支与支线原来是 branch 这一列，2026-09-21 删掉，只留这一列",
           "- `nested_ok`：1＝Q3 的勾选完全落在 Q2 之内、0＝有一到两处越界（%d／%d）"
           % (len(NESTED_OK), N - len(NESTED_OK)),
           ""]
@@ -826,7 +823,7 @@ need(DROPPED_IDS == [11, 15, 33, 118, 140, 161, 282, 311, 312, 335, 348, 378, 38
                      435, 495, 501, 564, 576, 582, 594],
      "剔除名单与既定名单不符：%s" % DROPPED_IDS)
 need(N == 579, "剔除后行数应为 579，实测 %d" % N)
-need(len(HEAD) == 428, "列数应为 428，实测 %d" % len(HEAD))
+need(len(HEAD) == 427, "列数应为 427，实测 %d" % len(HEAD))
 need(all(len(r) == len(HEAD) for r in BODY), "有行列数不齐")
 need(not [1 for r in BODY for v in r if v == ""], "还留着空白")
 need(len(S1_RPG) == 536, "S1 勾 RPG 应为 536，实测 %d" % len(S1_RPG))
@@ -860,8 +857,8 @@ need(len(valid("IDP53__1")) == 293, "Q22 有效应为 293，实测 %d" % len(val
 # 三个派生标记各自与源事实一致
 need({k for k in range(N) if GV("play_mmorpg", k) == "1"} == PLAY_MMO, "play_mmorpg 与 Q3 的勾选对不上")
 need({k for k in range(N) if GV("nested_ok", k) == "1"} == NESTED_OK, "nested_ok 与 Q2／Q3 的关系对不上")
-need({k for k in range(N) if GV("not_mmo_mostplay", k) == "1"}
-     == {k for k in range(N) if GV("branch", k) == "2"}, "not_mmo_mostplay 与 branch=2 应为同一批人")
+need({k for k in range(N) if GV("not_mmo_mostplay", k) == "1"} == set(range(N)) - Q4_PICK,
+     "not_mmo_mostplay 应与「Q4 没勾到游戏」的人逐行相同")
 need({k for k in range(N) if GV("is_mmorpg", k) == "1"} == IS_MMO, "is_mmorpg 与 S1／S2 的勾选对不上")
 
 # Q4 必须落在 Q3 之内（Q4 的设计前提）；Q3 越界 Q2 的人保留，由 nested_ok 标出
@@ -906,7 +903,7 @@ need(not (set(map(int, [r[P["ID"]] for r in BODY])) & set(DROPPED_IDS)), "被剔
 need(len(set(r[P["iirepSerial"]] for r in BODY)) == N, "iirepSerial 不是 %d 个唯一值" % N)
 need(HEAD[:5] == ["ID", "QUOTAGERANGE", "GENDER_NonBinary", "JPSTDREGION", "SCREENER1__1"],
      "前五列与预期不符：%s" % HEAD[:5])
-need(HEAD[-5:] == NEW, "末五列应为新增标记：%s" % HEAD[-5:])
+need(HEAD[-4:] == NEW, "末四列应为新增标记：%s" % HEAD[-4:])
 _md, COVER = build_code_table()
 missing_code = [h for h in HEAD if h not in COVER]
 need(not missing_code, "值码表漏了这些列：%s" % missing_code[:10])
