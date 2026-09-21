@@ -269,13 +269,14 @@ BASE_ANCHOR = [("SCREENER1__1", 579, "S1 全卷"), ("IDP30__1", 579, "Q2 全卷"
                ("IDP50__1", 510, "Q3 Q2 未走逃亡口"), ("IDP51__1", 293, "Q4 = play_mmorpg"),
                ("IDP52", 198, "Q5 主支"), ("IDP34", 198, "Q6"), ("IDP35", 198, "Q7"),
                ("IDP36", 196, "Q8 主支、扣 98"), ("IDP37", 381, "Q9 支线"),
+               ("IDP38", 381, "Q10 支线"), ("IDP39", 381, "Q11 支线"),
                ("IDP40", 371, "Q12 支线、扣 98"), ("IDP41", 579, "Q13 全卷"),
                ("IDP42", 579, "Q14 全卷"), ("IDP43__1", 146, "Q15 Q14 选不想"),
                ("IDP44__1", 221, "Q16 Q14 选想"), ("IDP46__1", 293, "Q18 = play_mmorpg"),
                ("IDP49__1", 268, "Q21 门槛内且未一直在玩"), ("IDP53__1", 293, "Q22"),
                ("IDP55", 293, "Q23"), ("IDP56__1", 206, "Q24 门槛内且非独狼"),
                ("IDP61", 564, "Q29 全卷、扣 98"), ("IDP64__1", 232, "Q32 关注 KOL 的人"),
-               ("IDP69", 565, "Q37 全卷、扣 98")]
+               ("IDP68", 579, "Q36 全卷"), ("IDP69", 565, "Q37 全卷、扣 98")]
 for h, want, why in BASE_ANCHOR:
     need(len(valid(h)) == want, "%s（%s）的有效 N 应为 %d，实测 %d"
          % (h, why, want, len(valid(h))))
@@ -337,6 +338,7 @@ say("")
 say("—— 议题一：样本构成与主玩游戏 ——")
 for v, q in [("GENDER_NonBinary", "S4"), ("QUOTAGERANGE", "S5"), ("JPSTDREGION", "（面板）")]:
     single(B1, q, v)
+single(B1, "Q36", "IDP68", note="全卷 579 人；泛 RPG 玩家的职业构成")
 multi(B1, "S3", "SCREENER3")
 multi(B1, "Q2", "IDP30", note="全卷 579 人；本题是「听说过」层")
 multi(B1, "Q3", "IDP50", note="Q2 未走逃亡口的 510 人；__18 是「一款都没玩过」的逃亡项")
@@ -357,6 +359,20 @@ for g in range(1, 18):
     add(B1, "漏斗", title, "同基数__%d" % g,
         "%s：293 人里听说过的人中有多少玩过" % GAMES[g - 1], in_gate_heard, b,
         "分子分母都在 play_mmorpg=1 的 293 人内部，不受 Q2／Q3 越界影响")
+
+# 两条线各自自报的那一款：是哪款、玩了多久、每天玩多久
+# Q5 与 Q9 题面相同、Q7 与 Q11 题面相同，主支与支线的基数不同（198 对 381），
+# 组标题必须各写各的，否则 md_lines() 会按标题把它们并进同一张表。
+single(B1, "Q5", "IDP52", note="主支 198 人（Q4 勾了至少一款）；本题问自报的最常玩一款",
+       title="Q5　主支自报的最常玩一款（198 人）")
+single(B1, "Q6", "IDP34", note="主支 198 人，问的是 Q5 自报的那一款",
+       title="Q6　主支那款玩了多久（198 人）")
+single(B1, "Q7", "IDP35", note="主支 198 人，问的是 Q5 自报的那一款",
+       title="Q7　主支那款每天玩多久（198 人）")
+single(B1, "Q10", "IDP38", note="支线 381 人，问的是 Q9 自报的那一款",
+       title="Q10　支线那款玩了多久（381 人）")
+single(B1, "Q11", "IDP39", note="支线 381 人，问的是 Q9 自报的那一款",
+       title="Q11　支线那款每天玩多久（381 人）")
 
 single(B1, "Q13", "IDP41", note="全卷；1＝最喜欢且玩过 RO 系列，4＝完全不了解")
 single(B1, "Q14", "IDP42", note="全卷；1＝完全不想，5＝非常想")
@@ -461,6 +477,18 @@ for q, v in [("Q8", "IDP36"), ("Q29", "IDP61")]:
     b = len(valid(v))
     add(B4, "付费近似切分", "%s 的未付费出口" % q, v, "课金はしていない 一项的比例", b,
         count(v, 1), "Q26 与 Q27 没有未付费出口，要切分只能用这几题的第一项近似")
+single(B4, "Q37", "IDP69", note="全卷 565 人（另有 14 人拒答已扣）；问的是月度可支配娱乐额，与 Q29 不是同一把尺子")
+# 可支配娱乐额与是否付费：两题都有效的人里，逐档看「所有游戏都不课金」的比例
+v37, v29 = valid("IDP69"), valid("IDP61")
+cross = v37 & v29
+for c in sorted(SINGLE["IDP69"][1]):
+    grp = {k for k in cross if COL["IDP69"][k] == str(c)}
+    if not grp:
+        continue
+    add(B4, "Q37×Q29", "Q37 各档里「所有游戏都不课金」的比例", "Q37=%d" % c,
+        "%s → Q29 选「课金はしていない」" % SINGLE["IDP69"][1][c], len(grp),
+        sum(1 for k in grp if COL["IDP61"][k] == "1"),
+        "两题都有效的 %d 人；这是并列关系，读不出因果" % len(cross))
 multi(B4, "S3", "SCREENER3", title="S3 设备（全卷 579 人）")
 
 say("")
@@ -509,6 +537,37 @@ add(B6, "RO 漏斗", "RO 四款", "Q4", "现在还有一款 RO 在玩", len(vali
     "Q4 分母是 play_mmorpg=1 的 293 人")
 add(B6, "RO 漏斗", "RO 四款", "流失", "玩过 RO、Q4 里一款 RO 都没勾（已不再玩 RO）", len(q3_ro),
     len(LAPSED), "需求方问题二的近似人群；其中 %d 人走支线、在 Q9 留了文本" % len(LAPSED_Q9))
+# 三层之间的转化：分子分母都收在同一个基数里，不受跨题越界影响
+HEARD_RO = q2_ro | yes(RO_OTHER)
+add(B6, "RO 漏斗", "RO 三层的同基数转化", "Q2→Q3", "听说过至少一款 RO 的人里玩过至少一款",
+    len(HEARD_RO), len(q3_ro), "两层都在 Q2 未走逃亡口的那批人里数，可以直接相除")
+add(B6, "RO 漏斗", "RO 三层的同基数转化", "Q3→Q4", "玩过至少一款 RO 的人里现在还玩着至少一款",
+    len(q3_ro), len(q4_ro), "同上")
+add(B6, "RO 漏斗", "RO 三层的同基数转化", "折全卷 Q3", "把玩过 RO 的人折到全卷 579 人上",
+    N, len(q3_ro), "分子是玩过 RO 的人数，分母换成全卷")
+add(B6, "RO 漏斗", "RO 三层的同基数转化", "折全卷 Q4", "把还在玩 RO 的人折到全卷 579 人上",
+    N, len(q4_ro), "分子是还在玩 RO 的人数，分母换成全卷")
+
+# 当前在玩的规模：Q4 勾了至少一款的那些人，全卷 579 人里的比例
+add(B6, "口径差", "两个口径", "Q4 有勾选", "当前还在玩至少一款 MMORPG（Q4 勾了至少一款）", N,
+    len(Q4_PICK), "「玩过」是 Q3 的口径（293 人），「还在玩」是这一行")
+
+# RO 在玩者自报的主玩款：61 人全部走主支，Q5 都有作答
+ro_main = [k for k in q4_ro if COL["IDP52"][k] not in NA]
+for c, n in collections.Counter(int(COL["IDP52"][k]) for k in ro_main).most_common():
+    add(B6, "RO 漏斗", "RO 在玩者自报的主玩款（61 人）", "IDP52", "Q5 = %s" % GAMES[c - 1],
+        len(ro_main), n, "这 61 人全部走主支，所以 Q5 都有作答")
+add(B6, "RO 漏斗", "RO 在玩者自报的主玩款（61 人）", "IDP52 汇总",
+    "其中主玩款就是 RO 系四款之一的", len(ro_main),
+    sum(1 for k in ro_main if int(COL["IDP52"][k]) in RO_G),
+    "其余把 RO 当副线，主玩的是别的 MMORPG")
+
+# IP 自评（Q13）与行为（Q3 玩过至少一款 RO）的对照
+for c in sorted(SINGLE["IDP41"][1]):
+    grp = {k for k in range(N) if COL["IDP41"][k] == str(c)}
+    add(B6, "RO 漏斗", "Q13 各层里玩过至少一款 RO 的比例", "Q13=%d" % c,
+        "%s → Q3 勾了 RO 系四款之一" % SINGLE["IDP41"][1][c], len(grp),
+        len(grp & q3_ro), "Q13 问的是整个 RO IP，Q3 只覆盖清单里的四款")
 
 # =============================================================== 3 Q9 文本
 Q9_IDX = P["IDP37"]
