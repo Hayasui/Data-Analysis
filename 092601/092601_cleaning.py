@@ -25,16 +25,16 @@
 Q9 那 2 名异常人在开放填空上的作废作答由 99 改记 97。
 
 2026-09-21 用户裁定三处：① Q18 至 Q27 的门槛由「自认 MMORPG 品类」（is_mmorpg）改成
-「在这 17 款里玩过至少一款」（play_mmorpg），前一条的置 97 范围随之重算；② Q2 与 Q3 的勾选
+「在这 17 个游戏里玩过至少一个」（play_mmorpg），前一条的置 97 范围随之重算；② Q2 与 Q3 的勾选
 完全不相交的 21 人整人剔除；③ 派生标记：elig_q4 改名 play_mmorpg，新增 not_mmo_mostplay
 与 nested_ok。三个派生标记的定义见第三段。剔除之后 ID 保留原始导出行号，不再连续。
 
 2026-09-21 后补：删掉 branch（1＝在玩组／2＝不在玩组）。它与 not_mmo_mostplay 逐行相同，两列里留一个
 名字更好用的；列数因此从 428 变成 427。在玩组与不在玩组各有多少人，仍可从 Q5 与 Q9 的有效 N 读出。
 
-2026-09-21 夜补：自我标签口径加一列复核版 is_mmorpg_adj。自认 MMORPG 品类却在清单里一款都没玩过的
+2026-09-21 夜补：自我标签口径加一列复核版 is_mmorpg_adj。自认 MMORPG 品类却在清单里一个都没玩过的
 有 52 人，按 Q9 自由填写分五档：写的是清单外的在线多人世界作品（勇者斗恶龙X 系、黑色沙漠、Warframe）
-的 7 人、只写「ドラクエ」不含款号的 2 人、写的是手游的 7 人，共 16 人留在自认层；写的是明确的非
+的 7 人、只写「ドラクエ」不含代数的 2 人、写的是手游的 7 人，共 16 人留在自认层；写的是明确的非
 MMORPG 的 34 人、写「没在玩」的 2 人，共 36 人按用户裁定归入泛 RPG 玩家、移出自认层。原始标签
 is_mmorpg 保留不动，报告里的对照维度改用 is_mmorpg_adj（242 人）。列数 427 → 428。
 """
@@ -86,7 +86,7 @@ RAW_IDX = {h: i for i, h in enumerate(NAMES)}
 TEXTS = dict(zip(NAMES, TEXTS_ROW))
 
 # --------------------------------------------------------------- 剔除
-# Q3 设计上只出示 Q2 勾过的游戏，实投没有落位：有 83 人在 Q3 勾了 Q2 里说没听过的款。
+# Q3 设计上只出示 Q2 勾过的游戏，实投没有落位：有 83 人在 Q3 勾了 Q2 里说没听过的游戏。
 # 其中两题勾选毫无交集的一批（Q3 有勾选，但与 Q2 一项都不重合），作答质量不可用，整人剔除。
 # 判定只看这两个条件，用原始作答。剔除后 ID 保留原始导出行号、不做重排，
 # 序列里的缺口就是被剔除的人——任何一个 ID 都能直接对回原始导出的行。
@@ -229,25 +229,25 @@ S1_RPG = y_raw("SCREENER1__1")
 S1_MMO = y_raw("SCREENER1__2")
 S2_MMO = y_raw("SCREENER2__1")
 IS_MMO = S1_MMO | S2_MMO                      # 并集：S1 或 S2 任一处勾了 MMORPG 都算
-# play_mmorpg：Q3 实际勾了至少一款的人。它与 is_mmorpg 是两条轴，互不包含——
-# 有人玩过 FF14 却不把「MMORPG」这个品类算在自己头上，也有人自认 MMORPG 却一款都没玩过。
+# play_mmorpg：Q3 实际勾了至少一个的人。它与 is_mmorpg 是两条轴，互不包含——
+# 有人玩过 FF14 却不把「MMORPG」这个品类算在自己头上，也有人自认 MMORPG 却一个都没玩过。
 PLAY_MMO = {k for k in range(N)
             if any(RAW[k][RAW_IDX["IDP50__%d" % g]] == "Yes" for g in range(1, 18))}
 # is_mmorpg_adj：自我标签口径的复核版（2026-09-21 用户裁定）。
-# 自认 MMORPG 品类却没在清单里玩过任何一款的有 52 人，看 Q9 自由填写分五档：
+# 自认 MMORPG 品类却没在清单里玩过任何一个的有 52 人，看 Q9 自由填写分五档：
 #   A 清单外的在线多人世界作品（留）：勇者斗恶龙X 系 4 人（1 人拼写错成「ドラコンクエストX」）、
 #    黑色沙漠 1 人、Warframe 2 人
-#   B 指向不明（留）：只写「ドラクエ」不含款号的 2 人。同一句话两个人同判，不因谁在 S1、
+#   B 指向不明（留）：只写「ドラクエ」不含代数的 2 人。同一句话两个人同判，不因谁在 S1、
 #    谁在 S2 勾的 MMORPG 而分开
 #   C 写的是手游（留，保守口径）：原神 2、放置少女 2、白猫、グラブル、ゼンゼロ 各 1。
-#    严格看这几款也不是 MMORPG；要一并移出，把这里的档号改成 D 即可
+#    严格看这几个游戏也不是 MMORPG；要一并移出，把这里的档号改成 D 即可
 #   D 明确非 MMORPG（移）：单机 RPG、动作、射击、卡牌、消除、体育、竞速、沙盒一类
 #   E 没在玩（移）：Q9 写「なし」「プレイしていない」
 # D 与 E 共 36 人移出，自认层从 278 收到 242。逐人的 Q9 原文与归类打印在清洗日志里。
 GAP52_TAG = {
     # A 清单外的在线多人世界作品（7 人，留）
     70: "A", 310: "A", 383: "A", 444: "A", 392: "A", 523: "A", 563: "A",
-    # B 只写「ドラクエ」不含款号（2 人，留）
+    # B 只写「ドラクエ」不含代数（2 人，留）
     340: "B", 540: "B",
     # C 手游（7 人，留）
     54: "C", 281: "C", 291: "C", 298: "C", 422: "C", 446: "C", 457: "C",
@@ -265,7 +265,7 @@ GAP52_IDX = {ORIG_ID.index(i) for i in GAP52_TAG}
 GAP52_MOVE = {ORIG_ID.index(i) for i in GAP52_MOVE_ID}
 IS_MMO_ADJ = IS_MMO - GAP52_MOVE
 Q2_ESC = y_raw("IDP30__19")                   # Q2 选「以上都没听过」
-Q3_ESC = y_raw("IDP50__18")                   # Q3 选「一款都没玩过」
+Q3_ESC = y_raw("IDP50__18")                   # Q3 选「一个都没玩过」
 Q4_GAME = ["IDP51__%d" % j for j in range(1, 18)]
 BRANCH_DUP = filled_raw("IDP52") & filled_raw("IDP37")   # 在玩组与不在玩组都答了的异常人
 
@@ -278,18 +278,18 @@ say("文件里只有完成的访谈，被终止的人不在其中，所以留下
 say("「S1 勾了 RPG 或 MMORPG」的合处样本，样本口径不需要再裁切。")
 say("S1 勾 RPG = %d；S1 勾 MMORPG = %d；S2 补进 MMORPG = %d；并集 is_mmorpg=1 共 %d 人。"
     % (len(S1_RPG), len(S1_MMO), len(S2_MMO), len(IS_MMO)))
-say("play_mmorpg=1（在这个 17 款清单里玩过至少一款）= %d 人。" % len(PLAY_MMO))
-say("  两者差 %d 人：is_mmorpg=1 而 play_mmorpg=0 的 %d 人（自认品类却一款没玩过），"
+say("play_mmorpg=1（在这个 17 个游戏的清单里玩过至少一个）= %d 人。" % len(PLAY_MMO))
+say("  两者差 %d 人：is_mmorpg=1 而 play_mmorpg=0 的 %d 人（自认品类却一个没玩过），"
     % (len(IS_MMO ^ PLAY_MMO), len(IS_MMO - PLAY_MMO)))
 say("  play_mmorpg=1 而 is_mmorpg=0 的 %d 人（玩过却没有把 MMORPG 算作自己玩的品类）。"
     % len(PLAY_MMO - IS_MMO))
 say("Q2 逃亡口 = %d 人；Q3 逃亡口 = %d 人。" % (len(Q2_ESC), len(Q3_ESC)))
 say("")
-say("二之一、自认 MMORPG 却在清单里一款都没玩过的 %d 人，按 Q9 自由填写归类"
+say("二之一、自认 MMORPG 却在清单里一个都没玩过的 %d 人，按 Q9 自由填写归类"
     % len(IS_MMO - PLAY_MMO))
 say("  A 清单外的在线多人世界作品（留）：%d 人"
     % sum(1 for t in GAP52_TAG.values() if t == "A"))
-say("  B 只写「ドラクエ」不含款号（留）：%d 人"
+say("  B 只写「ドラクエ」不含代数（留）：%d 人"
     % sum(1 for t in GAP52_TAG.values() if t == "B"))
 say("  C 写的是手游（留，保守口径）：%d 人"
     % sum(1 for t in GAP52_TAG.values() if t == "C"))
@@ -329,7 +329,7 @@ say("Q2 听说过哪些 MMORPG：全卷作答，无空值。选「以上都没�
 c = fill_blanks(pick("IDP50"))
 say("")
 say("Q3 玩过哪些 MMORPG：Q2 逃亡口的 %d 人写 97（%d 处）。" % (len(Q2_ESC), sum(c.values())))
-say("IDP50__18（一款都没玩过）= %d 人，是有效作答，保留。" % len(Q3_ESC))
+say("IDP50__18（一个都没玩过）= %d 人，是有效作答，保留。" % len(Q3_ESC))
 say("★ 平台侧失误：这 %d 人本应直接跳到 Q9，实投被继续问了 Q4，也被带进了 Q22。" % len(Q3_ESC))
 
 Q4_COLS = pick("IDP51")
@@ -339,17 +339,17 @@ say("")
 say("Q4 还在玩的有哪些：第一层，Q2 逃亡口的 %d 人写 97（%d 处）；" % (len(Q2_ESC), sum(c.values())))
 say("第二层，Q3 逃亡口的 %d 人在本题的作答全部作废，原有作答 %d 处，另有 %d 处本来就是空的。"
     % (len(Q3_ESC), n4_had, n4_blank))
-say("作废的理由：本题的选项集由 Q3 的勾选生成，Q3 说「一款都没玩过」的人没有任何可出示的")
+say("作废的理由：本题的选项集由 Q3 的勾选生成，Q3 说「一个都没玩过」的人没有任何可出示的")
 say("游戏，本题对他们不成立。处理方式是作废作答而不是剔除样本——这 %d 人在 Q3 与 Q9 及之后" % len(Q3_ESC))
 say("的题目上都有有效作答，删人会连带毁掉不在玩组与后段各题的分母。")
 say("清洗后本题有效 = %d 人。IDP51__18 是平台串过来的 Q3 文本，已整项作废，第四段删列。"
     % len(valid("IDP51__1")))
 Q4_PICK = {k for k in range(N) if any(GV(h, k) in ("Yes", "1") for h in Q4_GAME)}
-say("本题勾到至少一款游戏、继续走 Q5 至 Q8 的有 %d 人。" % len(Q4_PICK))
+say("本题勾到至少一个游戏、继续走 Q5 至 Q8 的有 %d 人。" % len(Q4_PICK))
 
 c = fill_blanks(pick("IDP52") + pick("IDP34") + pick("IDP35") + pick("IDP36"))
 say("")
-say("Q5 至 Q8 自报主玩的那一款（是哪一款、玩多久、每天多久、月消费）：")
+say("Q5 至 Q8 自报主玩的那一个（是哪一个、玩多久、每天多久、月消费）：")
 say("Q4 没勾到游戏的 %d 人写 97（%d 处）。这一段跳转本来就对，清洗只补空白。"
     % (N - len(Q4_PICK), sum(c.values())))
 
@@ -357,7 +357,7 @@ Q9_COLS = pick("IDP37") + pick("IDP38") + pick("IDP39") + pick("IDP40")
 c = fill_blanks(Q9_COLS)
 n9_had, n9_blank = void(Q9_COLS, BRANCH_DUP)
 say("")
-say("Q9 至 Q12 这条平行分支（最常玩的那一款，自由填写）：空白写缺失码（%d 处）；" % sum(c.values()))
+say("Q9 至 Q12 这条平行分支（最常玩的那一个，自由填写）：空白写缺失码（%d 处）；" % sum(c.values()))
 say("那 %d 名异常人在 Q9 至 Q12 的作答作废，原有作答 %d 处（另有 %d 处本来就是空的），"
     % (len(BRANCH_DUP), n9_had, n9_blank))
 say("按问卷流向他们只该走 Q5 至 Q8；Q9 的开放填空（IDP37）那两处也一并记 97。")
@@ -395,13 +395,13 @@ say("Q22 重点游戏形象的评分矩阵（%d 个行标记 ＋ %d 个评分项
 say("第一层，Q3 逃亡口的 %d 人在本题的作答全部作废，原有作答 %d 处；"
     % (len(Q3_ESC), n1_had))
 say("他们没有可出示的游戏行，本题对他们不成立。")
-say("第二层，平台自己加的第 18 行「一款都没玩过」整行作废，原有作答 %d 处，问卷里没有这一行。"
+say("第二层，平台自己加的第 18 行「一个都没玩过」整行作废，原有作答 %d 处，问卷里没有这一行。"
     % n2_had)
 say("第三层，其余空白写缺失码（%d 处）。空白来自 Q2 逃亡口的 %d 人，" % (sum(c.values()), len(Q2_ESC)))
 say("以及各人没勾过的游戏行——评分列按人按行铺开，某人在某行没被出示就没有值。")
-say("本段清洗后本题有效 = %d 人，保留 17 款游戏；MMORPG 门槛落位后见第二段末尾。"
+say("本段清洗后本题有效 = %d 人，保留 17 个游戏；MMORPG 门槛落位后见第二段末尾。"
     % len(valid("IDP53__1")))
-say("★ 报告要注明：有 %d 名受访者在这 17 款游戏中一款都没有玩过。" % len(Q3_ESC))
+say("★ 报告要注明：有 %d 名受访者在这 17 个游戏中一个都没有玩过。" % len(Q3_ESC))
 say("这个事实由 Q3 的 IDP50__18 承载，不依赖被作废的那一行。")
 
 SOLO = {k for k in range(N) if GV("IDP55", k).startswith("ソロ")}
@@ -425,22 +425,22 @@ say("Q30 至 Q35 信息触达与背景信息：空白写缺失码。")
 say("Q31 关注 → Q32：%d 人关注，%d 人不关注、不答 Q32。" % (len(valid("IDP64__1")), N - len(valid("IDP64__1"))))
 say("Q36 职业、Q37 可支配金额：单选，无空值。")
 
-# Q18 至 Q27 的门槛是 play_mmorpg：设计上这几题问的是「玩这个 17 款清单的人怎么看 MMORPG」，
+# Q18 至 Q27 的门槛是 play_mmorpg：设计上这几题问的是「玩这个 17 个游戏的清单的人怎么看 MMORPG」，
 # 实投时门槛没落位、全卷都被问了，不在门槛内的人的作答不是「他们答了」，是平台漏了门槛，置 97。
 # 2026-09-21 之前这里用的是 is_mmorpg；换成 play_mmorpg 之后，52 名自认 MMORPG 却没玩过清单里
-# 任何一款的作答被作废，67 名玩过却没自认 MMORPG 品类的作答被恢复。
+# 任何一个的作答被作废，67 名玩过却没自认 MMORPG 品类的作答被恢复。
 # Q17 与 Q28 不在此列：那两题整题无数据，全体 99。
 GATE_COLS = (pick("IDP46") + pick("IDP47") + pick("IDP48") + pick("IDP49")
              + Q22_FLAG + Q22_RATE + pick("IDP55") + pick("IDP56") + pick("IDP57")
              + pick("IDP58") + pick("IDP59"))
 g_had, g_blank = void(GATE_COLS, set(range(N)) - PLAY_MMO)
 say("")
-say("Q18 至 Q27 的门槛：设计上只对「在这 17 款里玩过至少一款」的人出示，实投门槛没落位、")
+say("Q18 至 Q27 的门槛：设计上只对「在这 17 个游戏里玩过至少一个」的人出示，实投门槛没落位、")
 say("全卷 %d 人都被问了。那 %d 名 play_mmorpg=0 的人的作答一律置 97，"
     % (N, N - len(PLAY_MMO)))
 say("原有作答 %d 处（另有 %d 处本来就是空的）。"
     % (g_had, g_blank))
-say("门槛内另有 %d 人是自认 MMORPG 品类却一款都没玩过的，他们的作答同样不在门槛内。"
+say("门槛内另有 %d 人是自认 MMORPG 品类却一个都没玩过的，他们的作答同样不在门槛内。"
     % len(IS_MMO - PLAY_MMO))
 say("Q17 与 Q28 不在此列：那两题整题无数据，全体写 99。")
 say("门槛收到清洗阶段之后，这一块的分母就是文件里的 N：")
@@ -488,12 +488,12 @@ say("                   复核移出的 %d 人（明确非 MMORPG 的 %d 人 + �
     % (len(GAP52_MOVE), sum(1 for t in GAP52_TAG.values() if t == "D"),
        sum(1 for t in GAP52_TAG.values() if t == "E")))
 say("                   泛 RPG 玩家；报告里的「MMORPG 自认层」指这一列，名单见值码表开头")
-say("  play_mmorpg      1 = 在 Q3 的 17 款里玩过至少一款（%d 人）／0 = 一款都没玩过（%d 人）"
+say("  play_mmorpg      1 = 在 Q3 的 17 个游戏里玩过至少一个（%d 人）／0 = 一个都没玩过（%d 人）"
     % (len(PLAY_MMO), N - len(PLAY_MMO)))
 say("                   这是「行为」口径；Q3 至 Q8 与 Q18 至 Q27 的分母都用它")
 say("  not_mmo_mostplay 1 = 走 Q9 至 Q12、报的是自由填写的最常玩游戏（%d 人）／0 = 走 Q5 至 Q8（%d 人）"
     % (N - len(Q4_PICK), len(Q4_PICK)))
-say("                   「没有一款还在玩的 MMORPG 可追问」的人，Q9 至 Q12 的分母")
+say("                   「没有一个还在玩的 MMORPG 可追问」的人，Q9 至 Q12 的分母")
 say("                   在玩组与不在玩组原来是 branch 的两个码，2026-09-21 删掉 branch：它与这一列")
 say("                   逐行相同，留一个名字更好用的。在玩组人数看 Q5 的有效 N，不在玩组看 Q9 的。")
 say("  nested_ok        1 = Q3 的勾选完全落在 Q2 之内（%d 人）／0 = 有一到两处越界（%d 人）"
@@ -524,7 +524,7 @@ say("删掉 %d 列，删后 %d 行 × %d 列。" % (len(DROP), len(BODY), len(HE
 say("  整列同一个值，或与别的列重复：BlocksOrder、iirepEveryone、resp_gender、language、")
 say("  respondent_gender_recoded（GENDER_NonBinary 的粗化派生）、age_group（与 QUOTAGERANGE 逐行相同）。")
 say("  平台自己多加、问卷里没有的选项列：IDP51__18（Q3 的文本串进了 Q4）、IDP53__18 与 L486 的 8 列")
-say("  （Q22 的第 18 行「一款都没玩过」）。这两处不是值本身错，是列或行本身不该存在。")
+say("  （Q22 的第 18 行「一个都没玩过」）。这两处不是值本身错，是列或行本身不该存在。")
 say("iirepSerial 现在落在第 %d 列（删列前在第 %d 列）。"
     % (HEAD.index("iirepSerial") + 1, NAMES.index("iirepSerial") + 1))
 
@@ -570,7 +570,7 @@ CODES = [
      dict({"男性": "0", "女性": "1", "その他": NA_NOREC}, **GENDER_REFUSE),
      "男 0／女 1；「回答しない」＝98；平台另加的「その他」＝99"),
     ("JPSTDREGION", "（面板）", "nominal", seq(REGION), "按日本标准地域顺序，北海道到九州"),
-    ("IDP52", "Q5", "nominal", seq(GAMES_Q2), "码序＝Q2 的 17 款游戏顺序"),
+    ("IDP52", "Q5", "nominal", seq(GAMES_Q2), "码序＝Q2 的 17 个游戏顺序"),
     ("IDP34", "Q6", "ordinal", seq(DUR), "升序：1＝3 个月以内"),
     ("IDP35", "Q7", "ordinal", seq(HRS), "升序：1＝30 分未满"),
     ("IDP36", "Q8", "ordinal", dict(seq(PAY), **REFUSE), "升序；末项不便回答＝98"),
@@ -663,7 +663,7 @@ Q_GATE = {
     "REGION": "面板配额变量",
     "Q2": "全卷作答；选「以上都没听过」的 %d 人跳过 Q3" % len(Q2_ESC),
     "Q3": "Q2 走了逃亡口的 %d 人跳过" % len(Q2_ESC),
-    "Q4": "Q3 勾过至少一款的 %d 人作答；Q3 逃亡口的 %d 人在这里的作答作废，记 97"
+    "Q4": "Q3 勾过至少一个的 %d 人作答；Q3 逃亡口的 %d 人在这里的作答作废，记 97"
           % (len(valid("IDP51__1")), len(Q3_ESC)),
     "Q5": "Q4 勾到游戏的 %d 人作答" % len(valid("IDP52")),
     "Q6": "同 Q5",
@@ -682,7 +682,7 @@ Q_GATE = {
     "Q19": "门槛是 `play_mmorpg=1`；清洗后 %d 人" % len(valid("IDP46__1")),
     "Q20": "门槛是 `play_mmorpg=1`；清洗后 %d 人" % len(valid("IDP46__1")),
     "Q21": "门槛是 `play_mmorpg=1`，且 Q20 未选「一直在玩」；清洗后 %d 人" % len(valid("IDP49__1")),
-    "Q22": "门槛是 `play_mmorpg=1`（在 Q3 的 17 款里玩过至少一款）；清洗后 %d 人"
+    "Q22": "门槛是 `play_mmorpg=1`（在 Q3 的 17 个游戏里玩过至少一个）；清洗后 %d 人"
            % len(valid("IDP53__1")),
     "Q23": "门槛是 `play_mmorpg=1`；清洗后 %d 人" % len(valid("IDP55")),
     "Q24": "门槛是 `play_mmorpg=1` 且 Q23 非独狼；清洗后 %d 人" % len(valid("IDP56__1")),
@@ -770,22 +770,22 @@ def question_block(q):
     if q == "Q22":                 # 矩阵：行标记 + 评分列
         flags = [h for h in cols if h.startswith("IDP53__")]
         rates = [h for h in cols if h.startswith("IDP54/")]
-        L.append("矩阵，%s。%d 款游戏各一行，每行 %d 条说法，共 %d 个评分项。"
+        L.append("矩阵，%s。%d 个游戏各一行，每行 %d 条说法，共 %d 个评分项。"
                  % (Q_GATE.get(q, ""), len(flags), len(rates) // max(len(flags), 1), len(rates)))
         L.append("")
-        L.append("行标记（1＝Q3 勾过这款、要给它打分；0＝没勾，这一行不给他看）：")
+        L.append("行标记（1＝Q3 勾过这个游戏、要给它打分；0＝没勾，这一行不给他看）：")
         L.append("")
         for h in flags:
             L.append("- `%s` = %s" % (h, label_opt(h)))
         L.append("")
-        L.append("八条说法，每款游戏各一列：")
+        L.append("八条说法，每个游戏各一列：")
         L.append("")
         for s in range(1, 9):
             t = TEXTS.get("IDP54/L469__%d" % s, "")
             L.append("%d. %s" % (s, short(t.split(" - ", 1)[1]) if " - " in t else ""))
         L.append("")
-        L.append("评分列的列名是 `IDP54/L{468+行序}__{说法号}`，例如第 1 款游戏第 3 条说法是 "
-                 "`IDP54/L469__3`，第 17 款游戏第 8 条是 `IDP54/L485__8`。取值用通用码："
+        L.append("评分列的列名是 `IDP54/L{468+行序}__{说法号}`，例如第 1 个游戏第 3 条说法是 "
+                 "`IDP54/L469__3`，第 17 个游戏第 8 条是 `IDP54/L485__8`。取值用通用码："
                  "1＝选了这条说法、0＝没选、97＝不适用。")
         L.append("")
         return L, set(cols)
@@ -814,7 +814,7 @@ def build_code_table():
          "## 剔除记录（2026-09-21）",
          "",
          "Q3 在问卷上有两个条件：只出示 Q2 勾过的游戏。实投没有按 Q2 过滤，有 83 人在 Q3 勾了",
-         "Q2 里说没听过的款。其中 **%d 人**两道题的勾选毫无交集（Q3 有勾选，但与 Q2 一项都不重合），"
+         "Q2 里说没听过的游戏。其中 **%d 人**两道题的勾选毫无交集（Q3 有勾选，但与 Q2 一项都不重合），"
          % len(DROPPED),
          "作答质量不可用，整人剔除，不在这份数据里。",
          "",
@@ -822,17 +822,17 @@ def build_code_table():
          "",
          "其余留有越界的人（%d 人）没有剔除，由 `nested_ok` 标出来：0 表示他的 Q3 勾选里有"
          % (N - len(NESTED_OK)),
-         "Q2 说没听过的款，1 表示两层完全套得上。分析要更严的口径时按这一列过滤即可。",
+         "Q2 说没听过的游戏，1 表示两层完全套得上。分析要更严的口径时按这一列过滤即可。",
          "",
          "**ID 不重排**：取值仍是原始导出的行号，上面那串号码就是序列里缺的那些，任何一个 ID",
          "都能直接对回原始导出的第几行。",
          "",
          "## 自我标签口径的复核（2026-09-21）",
          "",
-         "自认 MMORPG 品类（`is_mmorpg`=1）却在 17 款清单里一款都没玩过的有 %d 人。"
+         "自认 MMORPG 品类（`is_mmorpg`=1）却在 17 个游戏的清单里一个都没玩过的有 %d 人。"
          % len(IS_MMO - PLAY_MMO),
          "看他们在 Q9 自由填写里报的最常玩的游戏：写的是清单外的在线多人世界作品（勇者斗恶龙X 系、"
-         "黑色沙漠、Warframe）的 %d 人、只写「ドラクエ」不含款号的 %d 人、写的是手游的 %d 人，"
+         "黑色沙漠、Warframe）的 %d 人、只写「ドラクエ」不含代数的 %d 人、写的是手游的 %d 人，"
          % (sum(1 for t in GAP52_TAG.values() if t == "A"),
             sum(1 for t in GAP52_TAG.values() if t == "B"),
             sum(1 for t in GAP52_TAG.values() if t == "C")),
@@ -880,7 +880,7 @@ def build_code_table():
           % (len(IS_MMO_ADJ), N - len(IS_MMO_ADJ)),
           "  报告里说「MMORPG 自认层」时指这一列；移出的 %d 人归入泛 RPG 玩家"
           % len(GAP52_MOVE),
-          "- `play_mmorpg`：1＝在 Q3 的 17 款里玩过至少一款、0＝一款都没玩过（%d／%d）。"
+          "- `play_mmorpg`：1＝在 Q3 的 17 个游戏里玩过至少一个、0＝一个都没玩过（%d／%d）。"
           % (len(PLAY_MMO), N - len(PLAY_MMO)),
           "  行为口径；Q3 至 Q8 与 Q18 至 Q27 的分母都用它",
           "- `not_mmo_mostplay`：1＝走 Q9 至 Q12、报的是自由填写的最常玩游戏，0＝走 Q5 至 Q8（%d／%d）。"
@@ -924,7 +924,7 @@ need(tuple(sum(1 for t in GAP52_TAG.values() if t == c) for c in "ABCDE") == (7,
 need(len(IS_MMO_ADJ) == 242, "is_mmorpg_adj=1 应为 242，实测 %d" % len(IS_MMO_ADJ))
 need(IS_MMO_ADJ <= IS_MMO, "复核后的自认层应当是原始自认层的子集")
 need(len(IS_MMO_ADJ - PLAY_MMO) == 16,
-     "复核后仍有 16 人自认却没在清单里玩过任何一款，实测 %d" % len(IS_MMO_ADJ - PLAY_MMO)),
+     "复核后仍有 16 人自认却没在清单里玩过任何一个，实测 %d" % len(IS_MMO_ADJ - PLAY_MMO)),
 need(len(PLAY_MMO) == 293, "play_mmorpg=1 应为 293，实测 %d" % len(PLAY_MMO))
 need(len(PLAY_MMO - IS_MMO) == 67 and len(IS_MMO - PLAY_MMO) == 52,
      "两口径之差应为 67／52，实测 %d／%d" % (len(PLAY_MMO - IS_MMO), len(IS_MMO - PLAY_MMO)))
@@ -961,14 +961,14 @@ need({k for k in range(N) if GV("is_mmorpg_adj", k) == "1"} == IS_MMO_ADJ,
 # Q4 必须落在 Q3 之内（Q4 的设计前提）；Q3 越界 Q2 的人保留，由 nested_ok 标出
 need(not [1 for k in range(N) for g in range(1, 18)
           if GV("IDP51__%d" % g, k) == "1" and GV("IDP50__%d" % g, k) != "1"],
-     "有人的 Q4 勾了 Q3 里没勾过的款")
+     "有人的 Q4 勾了 Q3 里没勾过的游戏")
 need(len(NESTED_OK) == 517, "nested_ok=1 应为 517 人，实测 %d" % len(NESTED_OK))
 
 # Q22 的每一行都要与 Q3 的勾选逐行一致，勾了行的人八条说法都得是 0／1
 for g in range(1, 18):
     a = {k for k in range(N) if GV("IDP53__%d" % g, k) == "1"}
     b = {k for k in range(N) if GV("IDP50__%d" % g, k) == "1"} & PLAY_MMO
-    need(a == b, "Q22 第 %d 行应等于「Q3 勾了这款且在 play_mmorpg 门槛内」的人" % g)
+    need(a == b, "Q22 第 %d 行应等于「Q3 勾了这个游戏且在 play_mmorpg 门槛内」的人" % g)
     rate = ["IDP54/L%d__%d" % (468 + g, s) for s in range(1, 9)]
     for k in range(N):
         if k in a and not {GV(h, k) for h in rate} <= {"0", "1"}:
@@ -1010,7 +1010,7 @@ say(fmt % ("题", "变量", "清洗后N", "is_mmorpg", "is_mmorpg_adj", "play_mm
 GATES = [
     ("S1", "SCREENER1__1", "全卷"), ("S2", "SCREENER2__1", "仅 S1 勾 RPG"),
     ("S3", "SCREENER3__1", "全卷"), ("Q2", "IDP30__1", "全卷"),
-    ("Q3", "IDP50__1", "Q2 未走逃亡口"), ("Q4", "IDP51__1", "Q3 勾过至少一款"),
+    ("Q3", "IDP50__1", "Q2 未走逃亡口"), ("Q4", "IDP51__1", "Q3 勾过至少一个"),
     ("Q5", "IDP52", "Q4 仍有在玩"), ("Q6", "IDP34", "同 Q5"),
     ("Q7", "IDP35", "同 Q5"), ("Q8", "IDP36", "同 Q5；报告分母扣掉 98"),
     ("Q9", "IDP37", "三个逃亡口之一"), ("Q10", "IDP38", "同 Q9"),
@@ -1022,7 +1022,7 @@ GATES = [
     ("Q19", "IDP47__1", "play_mmorpg=1"),
     ("Q20", "IDP48__1", "play_mmorpg=1"),
     ("Q21", "IDP49__1", "play_mmorpg=1，且 Q20 未选一直在玩"),
-    ("Q22", "IDP53__1", "play_mmorpg=1（这 17 款里玩过至少一款）"),
+    ("Q22", "IDP53__1", "play_mmorpg=1（这 17 个游戏里玩过至少一个）"),
     ("Q23", "IDP55", "play_mmorpg=1"),
     ("Q24", "IDP56__1", "play_mmorpg=1 且 Q23 非独狼"), ("Q25", "IDP57__1", "同 Q24"),
     ("Q26", "IDP58__1", "play_mmorpg=1"),

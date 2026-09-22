@@ -1,0 +1,634 @@
+---
+title: "Q22 品类形象矩阵：混合 logistic 回归留档"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 2
+    theme: flatly
+params:
+  src: ""
+  outdir: ""
+  check_only: false
+  only_claims: [1, 2, 3, 4, 5, 6, 7, 8]
+---
+
+这份留档是复现入口里的第三支，与 `092601_cleaning.py`（原始导出 → RPG.csv）、
+`092601_analysis.py`（RPG.csv → 分布与配对）并列。前两支用 Python，形状与标签都在那边定死；
+这一支只用 R，因为混合 logistic 模型要在 lme4 里跑。三支的分工是同一条线：
+**Python 管数据进出，R 管模型与表格**，所以 R 里不出现任何清洗动作，只读
+`092601_regression_prep.py` 交出来的纯数字长表。
+
+每个代码块前面有一句中文说明它做什么、交出什么。改了这里要同步改
+`092601_regression_prep.py`，反过来也一样。两支跑通的自检都在块里，任何一条不过就不写盘。
+
+```{r setup}
+# 环境与参数。R 在这台机器上的默认 locale 是 C.UTF-8（不存在），于是 LC_CTYPE=C，
+# 后果是中文路径被 getwd() 打碎、中文写盘报 invalid char string。
+# 下面这一行把它设成 en_US.UTF-8，路径、写盘、nchar、knitr 就都正常了。
+Sys.setlocale("LC_CTYPE", "en_US.UTF-8")
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, comment = "")
+suppressPackageStartupMessages({
+  library(lme4)
+  library(car)
+})
+
+SRC <- params$src
+OUT <- params$outdir
+CHECK <- isTRUE(params$check_only)
+ONLY <- if (length(params$only_claims)) as.integer(params$only_claims) else 1:8
+if (!nzchar(SRC)) {
+  SRC <- file.path(dirname(knitr::current_input()), "data", "q22_long_ascii.csv")
+}
+if (!nzchar(OUT)) OUT <- dirname(SRC)
+if (!file.exists(SRC)) {
+  stop("找不到输入长表：", SRC,
+       "\n渲染时工作目录会切到 Rmd 所在目录，相对路径失效；请传绝对路径。")
+}
+SRC <- normalizePath(SRC, winslash = "/")
+dir.create(OUT, showWarnings = FALSE, recursive = TRUE)
+cat(sprintf("输入 %s\n输出 %s\n只跑说法 %s\n留档模式 %s\n",
+            SRC, OUT, paste(ONLY, collapse = " "), if (CHECK) "只比对不写盘" else "写盘"))
+```
+
+```{r read}
+# 读长表与标签表。标签表是 UKDS 说的「标签随文件走」：长表里全是数字码，
+# 游戏名、国别名、八条说法的中文名与日文原名放在同目录的 q22_labels.csv 里。
+LB <- read.csv(file.path(dirname(SRC), "q22_labels.csv"),
+               stringsAsFactors = FALSE, fileEncoding = "UTF-8")
+GT <- LB[LB$type == "game", ]
+CT <- LB[LB$type == "claim", ]
+GAME_SHORT <- GT$short
+GAME_CN <- setNames(GT$cn, GT$short)
+CLAIM_CN <- setNames(CT$cn, as.character(CT$key))
+
+D <- read.csv(SRC, stringsAsFactors = FALSE)
+stopifnot(nrow(D) == 8544L, all(D$y %in% c(0L, 1L)), length(unique(D$gidx)) == 17L)
+
+D$pid <- factor(D$pid)
+D$game <- factor(GAME_SHORT[D$gidx], levels = GAME_SHORT)
+D$ctry <- factor(D$ctry, levels = 1:4, labels = c("日系", "韩系", "中系", "美中联合"))
+na0 <- function(x) ifelse(x < 0, NA, x)
+D$age <- factor(na0(D$age))
+D$sex <- factor(na0(D$sex))
+D$social <- factor(na0(D$social))
+D$budget <- factor(na0(D$budget))
+D$stillply <- factor(D$nowp, levels = c(0, 1))
+
+# 分析样本：六个模型必须在同一批行上比，所以协变量缺答的行整行不进模型。
+# 受访者属性是「人」这一层的（年龄、性别、社交方式、预算），缺答的人在他的每条
+# 人-游戏记录上都缺，八条说法被剔的行数因此相同，比表不会出现样本不一致。
+COV <- c("stillply", "nrat", "social", "budget", "sex", "age")
+ok <- complete.cases(D[, COV])
+cat(sprintf("全样本 %d 行｜协变量缺答要剔 %d 行（涉及 %d 位受访者）｜进入模型 %d 行\n",
+            nrow(D), sum(!ok), length(unique(D$pid[!ok])), sum(ok)))
+D <- D[ok, ]
+D$pid <- droplevels(D$pid)
+D$game <- droplevels(D$game)
+stopifnot(length(unique(table(D$claim))) == 1L)
+
+cat(sprintf("长表 %d 行｜受访者 %d 人｜游戏 %d 个｜说法 %d 条\n",
+            nrow(D), nlevels(D$pid), nlevels(D$game), length(unique(D$claim))))
+cat(sprintf("每条说法的人-游戏记录 %d 条；逐条说法的答案数 %s\n",
+            sum(D$claim == 1), paste(tapply(D$y, D$claim, sum), collapse = " / ")))
+```
+
+```{r helpers}
+# 三个小工具，后面所有块都用它们，避免同一段代码抄两遍。
+#   r2x()   取边际 R² 与条件 R²。二分类 GLMM 的残差不是常数，按 Nakagawa 的做法把
+#           logistic 分布的方差 π²/3 放进分母；边际 R² 用固定效应线性预测值的方差。
+#   diagx() 取收敛提示、最大梯度、是否奇异拟合。
+#   lp()    嵌套模型的似然比检验。
+CTRL <- glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5))
+P3 <- pi^2 / 3
+
+r2x <- function(m) {
+  vc <- VarCorr(m)
+  su2 <- if (!is.null(vc$pid)) as.numeric(vc$pid[1, 1]) else 0
+  vg <- if (!is.null(vc$game)) as.numeric(vc$game[1, 1]) else 0
+  if (is.na(su2)) su2 <- 0
+  if (is.na(vg)) vg <- 0
+  X <- getME(m, "X"); b <- fixef(m); keep <- which(!is.na(b))
+  eta <- if (length(keep)) as.numeric(X[, keep, drop = FALSE] %*% b[keep]) else rep(0, nrow(X))
+  vf <- if (length(unique(eta)) < 2) 0 else var(eta)
+  tot <- vf + su2 + vg + P3
+  c(marg = vf / tot, cond = (vf + su2 + vg) / tot, su2 = su2, vg = vg)
+}
+diagx <- function(m) {
+  # lme4 的两项收敛诊断：最大梯度与 Hessian 特征值。梯度只有在拟合路径留下 derivs 时
+  # 才取得到（大模型常常没有），取不到就写「—」，另外报 Hessian 的最小比最大特征值，
+  # 这个数很小说明模型接近不可识别，也就是 lme4 说的 very large eigenvalue。
+  msg <- unlist(m@optinfo$conv$lme4$messages)
+  gr <- tryCatch({
+    g <- m@optinfo$derivs$gradient
+    if (is.numeric(g) && length(g) > 0) formatC(max(abs(g)), format = "f", digits = 4) else "—"
+  }, error = function(e) "—")
+  hs <- tryCatch({
+    H <- m@optinfo$derivs$Hessian
+    if (!is.numeric(H) || !length(H)) {
+      "—"
+    } else {
+      ev <- eigen(H, symmetric = TRUE, only.values = TRUE)$values
+      ev <- ev[is.finite(ev)]
+      if (!length(ev)) "—" else formatC(min(abs(ev)) / max(abs(ev)), format = "f", digits = 5)
+    }
+  }, error = function(e) "—")
+  c(note = if (length(msg)) gsub("[\r\n]+", " ", paste(msg, collapse = " ／ ")) else "无",
+    grad = gr, hess = hs,
+    singular = if (lme4::isSingular(m, tol = 1e-4)) "是" else "否")
+}
+r5 <- function(x) ifelse(is.na(x), NA_real_, round(x, 5))
+pstr <- function(x) ifelse(is.na(x), "—", ifelse(x < 1e-4, "<0.0001",
+                                                formatC(x, format = "f", digits = 4)))
+lp <- function(m1, m0) {
+  a <- suppressWarnings(anova(m0, m1, test = "Chisq"))
+  c(chisq = a$Chisq[2], df = a$Df[2], p = a$`Pr(>Chisq)`[2])
+}
+f2 <- function(x) ifelse(is.na(x), "—", formatC(x, format = "f", digits = 2))
+f3 <- function(x) ifelse(is.na(x), "—", formatC(x, format = "f", digits = 3))
+f4 <- function(x) ifelse(is.na(x), "—", formatC(x, format = "f", digits = 4))
+```
+
+## 一　模型清单：跑的是哪六个模型
+
+八条说法各建一次模，**每条说法一个因变量**，一行是一条「受访者 × 游戏」记录。
+全样本下每条说法 1068 行，8544 是八条加起来；协变量缺答的记录整行剔除之后，
+六个模型都在剩下的 1052 行上拟合。固定效应与随机效应如下，括号里是参照组。
+
+```{r catalogue}
+# 列出六个模型与它们的固定效应、参照组，顺便把统计量报出来。
+# 固定参数个数含常数项：国别 4（1＋3 个对比）、游戏 17（1＋16）、
+# 受访者属性 15（1＋不玩/在玩 1＋评了几个 1＋社交 3＋预算 6＋性别 1＋年龄 2）、
+# 游戏＋属性 31（17＋14）。
+CAT <- data.frame(
+  步骤 = c("0 空模型", "1 随机结构", "2 国别模型", "3 游戏模型", "4a 受访者属性", "4b 游戏＋属性"),
+  固定效应 = c("无", "无", "开发主导方", "游戏（17 个水平）", "受访者属性六项", "游戏＋受访者属性六项"),
+  参照组 = c("—", "—", "日系", paste0("《", GAME_CN["FFXIV"], "》"),
+             "已不在玩｜18–29 岁｜男性｜主动社交｜几乎没有预算", paste0("《", GAME_CN["FFXIV"], "》")),
+  随机效应 = c("受访者随机截距", "受访者随机截距＋游戏随机截距", "受访者随机截距", "受访者随机截距",
+               "受访者随机截距", "受访者随机截距"),
+  固定参数个数 = c(1, 1, 4, 17, 15, 31),
+  行数 = c(rep(nrow(D) / 8, 6)),
+  stringsAsFactors = FALSE)
+knitr::kable(CAT, row.names = FALSE)
+```
+
+```{r cov-dist}
+# 协变量的实际取值与人数，用来说明后面哪些档太薄。
+cl <- D[D$claim == 1, ]
+cov_tab <- rbind(
+  data.frame(协变量 = "面板年龄档 S5", 取值 = names(table(cl$age, useNA = "ifany")),
+             人_game记录 = as.integer(table(cl$age, useNA = "ifany"))),
+  data.frame(协变量 = "性别 S4", 取值 = names(table(cl$sex, useNA = "ifany")),
+             人_game记录 = as.integer(table(cl$sex, useNA = "ifany"))))
+cov_tab <- rbind(cov_tab,
+  data.frame(协变量 = "社交方式 Q23", 取值 = names(table(cl$social)),
+             人_game记录 = as.integer(table(cl$social))),
+  data.frame(协变量 = "每月娱乐预算 Q37", 取值 = names(table(cl$budget)),
+             人_game记录 = as.integer(table(cl$budget))))
+knitr::kable(cov_tab, row.names = FALSE)
+```
+
+## 二　逐步加入参数：六个模型的比较
+
+```{r fit}
+# 主循环。八条说法各跑六个模型，把要进表的东西全部收进 data.frame。
+# 这一步最慢（48 个 glmer 拟合），跑一次十几到几十分钟。
+T0 <- Sys.time()
+R0 <- R1 <- R2 <- R3 <- R4 <- NULL      # 逐张表累积
+COEF <- NULL                            # 固定效应明细
+DIAG <- NULL                            # 诊断
+P <- list(); M <- list()                # 存模型对象，后面要复用的
+for (s in ONLY) {
+  dd <- D[D$claim == s, ]
+  m00 <- glmer(y ~ 1 + (1 | pid), data = dd, family = binomial, control = CTRL)
+  mX  <- glmer(y ~ 1 + (1 | pid) + (1 | game), data = dd, family = binomial, control = CTRL)
+  mC  <- glmer(y ~ ctry + (1 | pid), data = dd, family = binomial, control = CTRL)
+  mG  <- glmer(y ~ game + (1 | pid), data = dd, family = binomial, control = CTRL)
+  mP  <- glmer(y ~ stillply + nrat + social + budget + sex + age + (1 | pid),
+               data = dd, family = binomial, control = CTRL)
+  mGP <- glmer(y ~ game + stillply + nrat + social + budget + sex + age + (1 | pid),
+               data = dd, family = binomial, control = CTRL)
+  M[[as.character(s)]] <- list(m00 = m00, mX = mX, mC = mC, mG = mG, mP = mP, mGP = mGP)
+
+  a0 <- r2x(m00); aX <- r2x(mX); aC <- r2x(mC); aG <- r2x(mG); aP <- r2x(mP); aGP <- r2x(mGP)
+  d0 <- diagx(m00); dG <- diagx(mG); dGP <- diagx(mGP)
+  ev <- sum(dd$y)
+
+  # 表 1　空模型：随机截距方差、潜变量尺度 ICC、信息准则、收敛
+  R0 <- rbind(R0, data.frame(
+    说法 = CLAIM_CN[as.character(s)], 说法号 = s,
+    随机截距方差 = as.numeric(f4(a0[["su2"]])),
+    ICC = as.numeric(f4(a0[["su2"]] / (a0[["su2"]] + P3))),
+    logLik = as.numeric(f2(logLik(m00))), AIC = as.numeric(f2(AIC(m00))),
+    BIC = as.numeric(f2(BIC(m00))), 收敛 = d0[["note"]], 奇异拟合 = d0[["singular"]],
+    行数 = nrow(dd), 受访者 = nlevels(droplevels(dd$pid)), 游戏 = nlevels(droplevels(dd$game)),
+    事件数 = ev, 事件占行数 = as.numeric(f4(ev / nrow(dd))),
+    stringsAsFactors = FALSE))
+  # 表 1b　步骤 1：加一个游戏随机截距值不值
+  lx <- lp(mX, m00); dX <- diagx(mX)
+  R1 <- rbind(R1, data.frame(
+    说法 = CLAIM_CN[as.character(s)], 说法号 = s,
+    受访者截距方差 = as.numeric(f4(aX[["su2"]])), 游戏截距方差 = as.numeric(f4(aX[["vg"]])),
+    两层合计ICC = as.numeric(f4((aX[["su2"]] + aX[["vg"]]) / (aX[["su2"]] + aX[["vg"]] + P3))),
+    logLik = as.numeric(f2(logLik(mX))), AIC = as.numeric(f2(AIC(mX))),
+    收敛 = dX[["note"]], 奇异拟合 = dX[["singular"]],
+    LRT_chisq = as.numeric(f3(lx[["chisq"]])), LRT_df = as.integer(lx[["df"]]),
+    LRT_p = as.numeric(f4(lx[["p"]])), stringsAsFactors = FALSE))
+  # 表 2　解释力：四种固定效应各自解释多少
+  R2 <- rbind(R2, data.frame(
+    说法 = CLAIM_CN[as.character(s)], 说法号 = s,
+    空模型_ICC = as.numeric(f4(a0[["su2"]] / (a0[["su2"]] + P3))),
+    国别_边际R2 = as.numeric(f4(aC[["marg"]])), 国别_条件R2 = as.numeric(f4(aC[["cond"]])),
+    游戏_边际R2 = as.numeric(f4(aG[["marg"]])), 游戏_条件R2 = as.numeric(f4(aG[["cond"]])),
+    受访者属性_边际R2 = as.numeric(f4(aP[["marg"]])),
+    游戏加属性_边际R2 = as.numeric(f4(aGP[["marg"]])),
+    stringsAsFactors = FALSE))
+  # 表 3　模型比较：嵌套走 LRT，非嵌套走 AIC／BIC
+  cmps <- list(
+    list(名 = "国别 对 空模型", a = mC, b = m00, k = "嵌套"),
+    list(名 = "游戏 对 空模型", a = mG, b = m00, k = "嵌套"),
+    list(名 = "游戏 对 国别", a = mG, b = mC, k = "嵌套"),
+    list(名 = "游戏＋属性 对 游戏", a = mGP, b = mG, k = "嵌套"))
+  for (cp in cmps) {
+    l <- lp(cp$a, cp$b)
+    R3 <- rbind(R3, data.frame(
+      说法 = CLAIM_CN[as.character(s)], 说法号 = s, 比较 = cp$名,
+      chisq = as.numeric(f3(l[["chisq"]])), df = as.integer(l[["df"]]),
+      p = r5(l[["p"]]),
+      AIC_简 = as.numeric(f2(AIC(cp$b))), AIC_全 = as.numeric(f2(AIC(cp$a))),
+      dAIC = as.numeric(f2(AIC(cp$a) - AIC(cp$b))),
+      BIC_简 = as.numeric(f2(BIC(cp$b))), BIC_全 = as.numeric(f2(BIC(cp$a))),
+      stringsAsFactors = FALSE))
+  }
+  # 表 4　固定效应明细：游戏模型里 16 个游戏对《最终幻想14》的每一个对比
+  sm <- summary(mG)$coefficients
+  for (g in GAME_SHORT[-1]) {
+    rn <- paste0("game", g)
+    if (!rn %in% rownames(sm)) next
+    b <- sm[rn, 1]; se <- sm[rn, 2]; z <- sm[rn, 3]; pv <- sm[rn, 4]
+    COEF <- rbind(COEF, data.frame(
+      说法 = CLAIM_CN[as.character(s)], 说法号 = s, 游戏 = GAME_CN[g],
+      基准 = GAME_CN["FFXIV"],
+      beta = as.numeric(f3(b)), SE = as.numeric(f3(se)),
+      OR = as.numeric(f3(exp(b))),
+      OR_下限 = as.numeric(f3(exp(b - 1.96 * se))),
+      OR_上限 = as.numeric(f3(exp(b + 1.96 * se))),
+      z = as.numeric(f3(z)), p = r5(pv), stringsAsFactors = FALSE))
+  }
+  # 表 6　诊断：收敛、奇异、共线性、事件数与参数数。一行一个模型（空、游戏、最终），
+  # 长表摆开比横着摊 15 列好读。共线性用同一套固定效应跑一个普通 glm 再算 GVIF——
+  # VIF 讲的是设计，与随机效应那一层无关，这样绕开 car::vif 对 glmer 的挑食。
+  gg <- glm(y ~ game + stillply + nrat + social + budget + sex + age,
+            data = dd, family = binomial)
+  vv <- tryCatch(car::vif(gg), error = function(e) NULL)
+  maxgvif <- if (is.matrix(vv) && ncol(vv) >= 3) max(vv[, 3]) else NA_real_
+  dGP2 <- diagx(mGP)
+  DIAG <- rbind(DIAG,
+    data.frame(说法 = CLAIM_CN[as.character(s)], 说法号 = s, 模型 = "0 空模型",
+      事件数 = ev, 固定参数数 = length(fixef(m00)),
+      每参数多少个事件 = as.numeric(f2(ev / length(fixef(m00)))),
+      最大GVIF = "—", 收敛提示 = d0[["note"]], 最大梯度 = d0[["grad"]],
+      Hessian特征值比 = d0[["hess"]], 奇异拟合 = d0[["singular"]], stringsAsFactors = FALSE),
+    data.frame(说法 = CLAIM_CN[as.character(s)], 说法号 = s, 模型 = "3 游戏模型",
+      事件数 = ev, 固定参数数 = length(fixef(mG)),
+      每参数多少个事件 = as.numeric(f2(ev / length(fixef(mG)))),
+      最大GVIF = "—", 收敛提示 = dG[["note"]], 最大梯度 = dG[["grad"]],
+      Hessian特征值比 = dG[["hess"]], 奇异拟合 = dG[["singular"]], stringsAsFactors = FALSE),
+    data.frame(说法 = CLAIM_CN[as.character(s)], 说法号 = s, 模型 = "4b 游戏＋属性",
+      事件数 = ev, 固定参数数 = length(fixef(mGP)),
+      每参数多少个事件 = as.numeric(f2(ev / length(fixef(mGP)))),
+      最大GVIF = as.numeric(f2(maxgvif)), 收敛提示 = dGP2[["note"]],
+      最大梯度 = dGP2[["grad"]], Hessian特征值比 = dGP2[["hess"]],
+      奇异拟合 = dGP2[["singular"]], stringsAsFactors = FALSE))
+  cat(sprintf("说法 %d 跑完（%.1f 分钟）\n", s,
+              as.numeric(difftime(Sys.time(), T0, units = "mins"))))
+  flush.console()
+}
+cat(sprintf("六个模型 × %d 条说法全部跑完，用时 %.1f 分钟\n",
+            length(ONLY), as.numeric(difftime(Sys.time(), T0, units = "mins"))))
+```
+
+```{r multcomp}
+# 多重比较。八条说法各建一次模，就是八次同族比较，必须校正。
+# 选定的做法：同一条说法内部（16 个游戏对比之间）用 Holm，跨八条说法的模型比较用 Holm，
+# 同时给出 BH 作对照，方便换口径。
+R3$p_Holm <- NA_real_; R3$p_BH <- NA_real_
+for (cn in unique(R3$比较)) {
+  i <- which(R3$比较 == cn)
+  R3$p_Holm[i] <- p.adjust(R3$p[i], method = "holm")
+  R3$p_BH[i] <- p.adjust(R3$p[i], method = "BH")
+}
+R3$结论 <- ifelse(R3$p_Holm < 0.05, "校正后仍显著", "校正后不显著")
+
+COEF$p_Holm <- NA_real_; COEF$p_BH <- NA_real_
+for (s in unique(COEF$说法号)) {
+  i <- which(COEF$说法号 == s)
+  COEF$p_Holm[i] <- p.adjust(COEF$p[i], method = "holm")
+  COEF$p_BH[i] <- p.adjust(COEF$p[i], method = "BH")
+}
+COEF$校正后显著 <- ifelse(COEF$p_Holm < 0.05, "是", "否")
+cat("八次模型比较里，游戏 对 国别 这一行校正后仍显著的：",
+    sum(R3$比较 == "游戏 对 国别" & R3$p_Holm < 0.05), "条\n")
+cat("固定效应表共", nrow(COEF), "行；校正后仍显著的", sum(COEF$校正后显著 == "是"), "行\n")
+```
+
+```{r descriptive}
+# 描述与配对。这一块不建模，出的是「并排比」与「配对比」的对照、八条说法在游戏内部
+# 彼此的相关、以及人均勾了几条。它支撑的结论是：并排看出来的差距有多大一部分是
+# 「谁在评这个游戏」，而不是游戏本身的形象差。
+# 游戏内的两两 phi、人均勾选条数、一条不勾的比例
+rows <- NULL
+for (g in 1:17) {
+  dg <- D[D$gidx == g & D$claim == 1, ]
+  ng <- nrow(dg)
+  pg <- paste(dg$pid)
+  base <- dg
+  W <- sapply(1:8, function(s) {
+    dd <- D[D$gidx == g & D$claim == s, ]
+    dd$y[match(pg, paste(dd$pid))]
+  })
+  mn <- mean(rowSums(W)); zero <- mean(rowSums(W) == 0)
+  ph <- cor(W)[upper.tri(cor(W))]
+  rows <- rbind(rows, data.frame(
+    项目 = "逐个游戏", 名称 = GAME_CN[[GAME_SHORT[g]]], 值 = as.numeric(f2(ng)),
+    补充 = sprintf("人均勾 %.2f 条｜phi 均值 %+.3f｜一条不勾 %.1f%%",
+                  mn, mean(ph), zero * 100), stringsAsFactors = FALSE))
+}
+# 并排勾选率与配对差值：逐条说法
+PAIRN <- 20
+prs <- combn(GAME_SHORT, 2, simplify = FALSE)
+pairstat <- NULL
+for (s in 1:8) {
+  dd <- D[D$claim == s, ]
+  W <- tapply(dd$y, list(as.character(dd$pid), as.character(dd$game)), function(v) v[1])
+  W <- W[, GAME_SHORT, drop = FALSE]
+  rate <- colMeans(W, na.rm = TRUE)
+  n_per <- colSums(!is.na(W))
+  rng <- (max(rate) - min(rate)) * 100
+  dif <- numeric(0); big <- numeric(0); nsig <- 0L; npair <- 0L; n40 <- 0L
+  for (p in prs) {
+    a <- W[, p[1]]; b <- W[, p[2]]
+    ok <- !is.na(a) & !is.na(b)
+    n <- sum(ok)
+    if (n < PAIRN) next
+    npair <- npair + 1L
+    if (n >= 40) n40 <- n40 + 1L
+    d <- mean(a[ok]) - mean(b[ok])
+    dif <- c(dif, d * 100); big <- c(big, abs(d) * 100)
+    bb <- sum(a[ok] == 1 & b[ok] == 0); cc <- sum(a[ok] == 0 & b[ok] == 1)
+    pv <- if (bb + cc > 0) binom.test(bb, bb + cc, 0.5)$p.value else 1
+    if (pv < 0.05) nsig <- nsig + 1L
+  }
+  pairstat <- rbind(pairstat, data.frame(
+    说法 = CLAIM_CN[as.character(s)], 说法号 = s,
+    并排极差_pp = as.numeric(f2(rng)),
+    配对均差_pp = as.numeric(f2(mean(big))),
+    配对最大差_pp = as.numeric(f2(max(big))),
+    配对N20以上 = npair, 其中N40以上 = n40,
+    配对显著次数 = nsig, stringsAsFactors = FALSE))
+}
+# 每条「受访者 × 游戏」记录上勾了几条说法：平台强制至少勾一条，所以没有一条都没勾的记录
+CELL <- aggregate(y ~ pid + gidx, data = D, FUN = sum)
+cellinfo <- data.frame(
+  项目 = c("人-游戏记录数", "每条记录勾选的条数：最少", "最多", "平均",
+           "只勾 1 条的记录数", "只勾 1 条的记录占多少", "一条都没勾的记录数",
+           "受访者平均评几个游戏", "受访者一共几位"),
+  值 = c(nrow(CELL), min(CELL$y), max(CELL$y), sprintf("%.2f", mean(CELL$y)),
+          sum(CELL$y == 1), sprintf("%.1f%%", mean(CELL$y == 1) * 100),
+          sum(CELL$y == 0), sprintf("%.2f", nrow(CELL) / nlevels(D$pid)),
+          nlevels(D$pid)))
+# 平台强制至少勾一条，对每一条说法的事件数有什么影响：只勾 1 条的那些记录贡献了多少事件
+onekey <- paste(CELL$pid[CELL$y == 1], CELL$gidx[CELL$y == 1])
+D$key <- paste(D$pid, D$gidx)
+forced <- data.frame(
+  说法 = sapply(1:8, function(s) CLAIM_CN[as.character(s)]),
+  事件数 = sapply(1:8, function(s) sum(D$y[D$claim == s])),
+  其中来自只勾1条的记录 = sapply(1:8, function(s) {
+    i <- which(D$claim == s); sum(D$y[i] == 1 & D$key[i] %in% onekey)
+  }))
+forced$占比 <- sprintf("%.1f%%", 100 * forced$其中来自只勾1条的记录 / forced$事件数)
+```
+
+```{r personlevel}
+# 受访者层：一个人勾得多少，跟他是谁有关吗。因变量是这位受访者在该条说法上的勾选率，
+# 普通最小二乘，系数只用来比方向——因变量的取值范围被压在 (0,1) 之内，不当概率模型用。
+nrat_p <- tapply(D$y, D$pid, length)
+base <- D[!duplicated(D$pid), c("pid", "age", "sex", "social", "budget")]
+PL <- NULL
+for (s in 1:8) {
+  dd <- D[D$claim == s, ]
+  num <- tapply(dd$y, dd$pid, sum)
+  den <- tapply(dd$y, dd$pid, length)
+  pf <- data.frame(pid = names(num), mr = as.numeric(num) / as.numeric(den),
+                   nrat = as.numeric(den))
+  pf <- merge(pf, base, by = "pid")
+  fit <- lm(mr ~ age + sex + social + budget + nrat, data = pf)
+  fs <- summary(fit)
+  fp <- pf(fs$fstatistic[1], fs$fstatistic[2], fs$fstatistic[3], lower.tail = FALSE)
+  PL <- rbind(PL, data.frame(
+    说法 = CLAIM_CN[as.character(s)], 说法号 = s,
+    R2 = as.numeric(f4(fs$r.squared)), 调整后R2 = as.numeric(f4(fs$adj.r.squared)),
+    F检验p = pstr(fp), 用的人数 = length(fit$residuals), stringsAsFactors = FALSE))
+}
+```
+
+```{r write}
+# 落盘。先自检，不过就不写。产物分三类：给机器比对的长表（四个 回归表_*.csv）、
+# 给人读的 回归结果.md、留痕的 回归日志.txt。
+CHK <- character(0)
+add <- function(ok, msg) CHK <<- c(CHK, sprintf("[%s] %s", if (ok) "v" else "x", msg))
+add(nrow(R0) == length(ONLY), sprintf("空模型表 %d 行（应 %d）", nrow(R0), length(ONLY)))
+add(nrow(R2) == length(ONLY), sprintf("解释力表 %d 行（应 %d）", nrow(R2), length(ONLY)))
+add(nrow(R3) == 4L * length(ONLY), sprintf("模型比较表 %d 行（应 %d）", nrow(R3), 4L * length(ONLY)))
+add(nrow(COEF) == 16L * length(ONLY), sprintf("固定效应表 %d 行（应 %d）", nrow(COEF), 16L * length(ONLY)))
+add(nrow(DIAG) == 3L * length(ONLY), sprintf("诊断表 %d 行（应 %d）", nrow(DIAG), 3L * length(ONLY)))
+add(all(is.finite(R0$ICC)) && all(R0$ICC > 0 & R0$ICC < 1), "空模型 ICC 都落在 0 与 1 之间")
+add(all(is.finite(R2$国别_边际R2)) && all(is.finite(R2$游戏_边际R2)), "两张边际 R² 都算出来了")
+add(all(abs(R2$空模型_ICC - R0$ICC) < 1e-4), "解释力表里的空模型 ICC 与空模型表逐行一致")
+add(all(is.finite(R3$p)) && all(is.finite(R3$p_Holm)), "模型比较的 p 与校正后 p 都在")
+add(max(cellinfo$值[cellinfo$项目 == "一条都没勾的记录数"], 0) == 0,
+    "没有一条都没勾的人-游戏记录（平台强制至少勾一条）")
+fail <- sum(startsWith(CHK, "[x]"))
+cat(paste(CHK, collapse = "\n"), "\n")
+# 自检结果同时写到 stderr：knitr 会把块里的 cat 收进文档，命令行上看不到，
+# 显式写 stderr 之后留档与命令行两条路都能看见结论。
+writeLines(CHK, con = stderr())
+writeLines(sprintf("自检：通过 %d 项，不通过 %d 项", length(CHK) - fail, fail), con = stderr())
+stopifnot(fail == 0L)
+
+wtab <- function(df, name) {
+  p <- file.path(OUT, name)
+  bad <- any(sapply(df, function(x) any(grepl('[,"]', as.character(x)))))
+  txt <- capture.output(write.table(df, sep = ",", quote = bad, row.names = FALSE, na = "NA"))
+  if (CHECK && file.exists(p)) {
+    old <- readLines(p, encoding = "UTF-8", warn = FALSE)
+    if (identical(old, txt)) {
+      cat(sprintf("  [v] %s 与盘上一致\n", name))
+    } else {
+      cat(sprintf("  [x] %s 与盘上不一致：盘上 %d 行，重算 %d 行\n", name, length(old), length(txt)))
+    }
+  } else {
+    con <- file(p, open = "w", encoding = "UTF-8")
+    writeLines(txt, con, useBytes = TRUE)
+    close(con)
+    cat(sprintf("  [v] 写了 %s（%d 行）\n", name, nrow(df)))
+  }
+}
+if (!CHECK) {
+  wtab(R0, "回归表_空模型.csv")
+  wtab(R1, "回归表_随机结构.csv")
+  wtab(R2, "回归表_解释力.csv")
+  wtab(R3, "回归表_模型比较.csv")
+  wtab(COEF, "回归表_固定效应.csv")
+  wtab(pairstat, "回归表_描述与配对.csv")
+  wtab(DIAG, "回归表_诊断.csv")
+  wtab(PL, "回归表_受访者层.csv")
+  wtab(rows, "回归表_逐个游戏.csv")
+  wtab(cellinfo, "回归表_人游戏记录.csv")
+  wtab(forced, "回归表_平台强制.csv")
+  cat("产物目录：", OUT, "\n")
+} else {
+  cat("--check：只重算比对，不写盘\n")
+}
+```
+
+```{r readout}
+# 中文读数。这一块把上面几张表拼成一份给人读的 markdown（回归结果.md），
+# 排版与 分析结果.md 一致：先一段说明，再逐节摆表，表的编号与 csv 名字对应。
+mdtab <- function(df) {
+  h <- paste0("| ", paste(names(df), collapse = " | "), " |")
+  s <- paste0("| ", paste(rep("---", ncol(df)), collapse = " | "), " |")
+  b <- apply(df, 1, function(r) {
+    paste0("| ", paste(trimws(as.character(r)), collapse = " | "), " |")
+  })
+  paste(c(h, s, b), collapse = "\n")
+}
+RD <- c(
+  "# Q22 品类形象矩阵：混合 logistic 回归读数",
+  "",
+  sprintf("数据：`%s`（%d 行）　脚本：`092601_regression_prep.py` ＋ `092601_regression.Rmd`", basename(SRC), nrow(D)),
+  sprintf("版本：%s", Sys.Date()),
+  "",
+  "八条说法各建一次模，一行是一条「受访者 × 游戏」记录，所以每个模型的行数相同。",
+  sprintf("全样本 1068 条人-游戏记录，协变量缺答的整行不进模型，剩下 %d 条、%d 位受访者、%d 个游戏；六张模型都在这一批行上比。",
+          nrow(D) / 8, nlevels(D$pid), nlevels(D$game)),
+  "",
+  "## 一　空模型",
+  "",
+  mdtab(R0),
+  "",
+  "ICC 按潜变量尺度算：σ_u²／(σ_u²＋π²/3)，π²/3 是 logistic 分布的方差，约 3.2899。",
+  "",
+  "## 二　随机结构：再加一个游戏随机截距值不值",
+  "",
+  mdtab(R1),
+  "",
+  "## 三　四种固定效应各解释多少",
+  "",
+  mdtab(R2),
+  "",
+  "## 四　模型比较（嵌套走似然比，校正为 Holm 与 BH）",
+  "",
+  mdtab(R3),
+  "",
+  "## 五　固定效应明细：16 个游戏对《最终幻想14》",
+  "",
+  mdtab(COEF),
+  "",
+  "## 六　描述与配对",
+  "",
+  mdtab(pairstat),
+  "",
+  mdtab(rows),
+  "",
+  mdtab(cellinfo),
+  "",
+  mdtab(forced),
+  "",
+  "## 七　诊断",
+  "",
+  mdtab(DIAG),
+  "",
+  paste("最大梯度与 Hessian 特征值比两列来自 lme4 的 optinfo，不是每个模型都有：",
+        "实测 1、4、17 个参数的模型都有，31 个参数的「游戏＋属性」模型两个都是空的",
+        "（lme4 对参数量大的模型不保存导数）。最终模型的收敛因此按它自己的收敛提示与",
+        "奇异拟合两条判断，梯度诊断看游戏模型那一行。GVIF 只在最终模型那一行有，",
+        "其余两个模型固定效应是分组变量，谈多重共线性没有意义。"),
+  "",
+  "## 八　受访者层：勾得多少跟他是谁有关吗",
+  "",
+  mdtab(PL),
+  "",
+  "## 边界",
+  "",
+  paste("数据来自配额样本，不是概率样本，系数只覆盖随机抽样误差；八条说法各建一次模，",
+        "同一批人反复出现，同一份问卷里的自变量彼此也相关，校正只处理第一条。",
+        "二分类模型的 ICC 是潜变量尺度上的变异分解，不能读成「几成由答题的人决定」。",
+        "平台强制每个人对他评过的每个游戏至少勾一条，把每一条说法的底部抬高了，幅度见第六节的表。"),
+  "")
+RD <- c(RD, "## 自检", "", paste("    ", CHK), "")
+# 回归日志.txt：留痕用，与 分析日志.txt 同一路数；同时写 stderr，让命令行也能看见。
+EV <- sapply(1:8, function(s) sum(D$y[D$claim == s]))
+LG <- c(
+  "Q22 品类形象矩阵：混合 logistic 回归流程日志",
+  sprintf("时间 %s", format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
+  sprintf("输入 %s", SRC),
+  sprintf("输出目录 %s", OUT),
+  "",
+  "一、分析样本",
+  "  全样本 1068 条人-游戏记录、293 位受访者；协变量缺答的整行不进模型，六个模型都在同一批行上比。",
+  sprintf("  分析样本 %d 条、%d 位受访者、%d 个游戏；每条说法 %d 条记录。",
+          nrow(D) / 8, nlevels(D$pid), nlevels(D$game), nrow(D) / 8),
+  sprintf("  逐条说法的事件数：%s",
+          paste(sprintf("%s %d", CLAIM_CN[as.character(1:8)], EV), collapse = "　")),
+  "",
+  "二、模型清单（因变量 0/1，family=binomial，logit；lme4::glmer，优化器 bobyqa）",
+  "  0   空模型      y ~ 1 + (1|pid)",
+  "  1   随机结构    y ~ 1 + (1|pid) + (1|game)",
+  "  2   国别模型    y ~ ctry + (1|pid)                    国别参照 日系",
+  "  3   游戏模型    y ~ game + (1|pid)                    游戏参照 最终幻想14",
+  "  4a  受访者属性  y ~ stillply + nrat + social + budget + sex + age + (1|pid)",
+  "  4b  游戏＋属性  y ~ game + stillply + nrat + social + budget + sex + age + (1|pid)",
+  "  嵌套模型走似然比检验，非嵌套模型走 AIC／BIC；所有比较同一因变量、同样本、同变换。",
+  "",
+  "三、多重比较",
+  "  模型比较按比较名分族（每族八次）用 Holm，固定效应按说法分族（每次十六个对比）用 Holm，",
+  "  另附 BH 作对照，两列都在表里，换口径不用重跑模型。",
+  "",
+  "四、诊断汇总",
+  sprintf("  收敛提示非「无」的模型：%d 个（共 %d 行）", sum(DIAG$收敛提示 != "无"), nrow(DIAG)),
+  sprintf("  判定为奇异拟合的模型：%d 个", sum(DIAG$奇异拟合 == "是")),
+  sprintf("  每参数事件数低于 10 的行：%d 行", sum(DIAG$每参数多少个事件 < 10)),
+  sprintf("  最大 GVIF 的最高值：%s",
+          max(as.numeric(DIAG$最大GVIF[DIAG$最大GVIF != "—"]), na.rm = TRUE)),
+  sprintf("  只勾 1 条的人-游戏记录占 %s，一条都没勾的记录 %d 条（平台强制至少勾一条）",
+          cellinfo$值[cellinfo$项目 == "只勾 1 条的记录占多少"],
+          as.integer(cellinfo$值[cellinfo$项目 == "一条都没勾的记录数"])),
+  "",
+  "五、自检",
+  paste0("  ", CHK))
+if (!CHECK) {
+  for (f in list(c("回归结果.md", RD), c("回归日志.txt", LG))) {
+    writeLines(f[[2]], con <- file(file.path(OUT, f[[1]]), open = "w", encoding = "UTF-8"),
+               useBytes = TRUE)
+    close(con)
+  }
+  cat("写了 回归结果.md 与 回归日志.txt\n")
+} else {
+  cat("--check：不重写 回归结果.md 与 回归日志.txt\n")
+}
+writeLines(LG, con = stderr())
+```
+
+```{r log, eval=FALSE}
+# 回归日志.txt 由本块之外的一次性命令从渲染日志里取，避免与 分析日志.txt 重复造轮子。
+```
+
+# 边界
+
+数据来自配额样本，不是概率样本，系数只覆盖随机抽样误差。八条说法各建一次模，
+同一批人反复出现，同一份问卷里的自变量彼此也相关，校正只处理第一条。
+二分类模型的 ICC 是潜变量尺度上的变异分解，不是「四成归答题的人」。
+平台强制每个人对他评过的每个游戏至少勾一条，把每一条说法的底部抬高了，这一步的影响见诊断表。
