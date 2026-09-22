@@ -79,8 +79,10 @@ D$stillply <- factor(D$nowp, levels = c(0, 1))
 # 分析样本：六个模型必须在同一批行上比，所以协变量缺答的行整行不进模型。
 # 受访者属性是「人」这一层的（年龄、性别、社交方式、预算），缺答的人在他的每条
 # 人-游戏记录上都缺，八条说法被剔的行数因此相同，比表不会出现样本不一致。
+# DA 留住全样本，给第六节的描述与配对用——那一段不含协变量，没有理由剔行。
 COV <- c("stillply", "nrat", "social", "budget", "sex", "age")
 ok <- complete.cases(D[, COV])
+DA <- D
 cat(sprintf("全样本 %d 行｜协变量缺答要剔 %d 行（涉及 %d 位受访者）｜进入模型 %d 行\n",
             nrow(D), sum(!ok), length(unique(D$pid[!ok])), sum(ok)))
 D <- D[ok, ]
@@ -317,16 +319,16 @@ cat(sprintf("六个模型 × %d 条说法全部跑完，用时 %.1f 分钟\n",
 R3$p_Holm <- NA_real_; R3$p_BH <- NA_real_
 for (cn in unique(R3$比较)) {
   i <- which(R3$比较 == cn)
-  R3$p_Holm[i] <- p.adjust(R3$p[i], method = "holm")
-  R3$p_BH[i] <- p.adjust(R3$p[i], method = "BH")
+  R3$p_Holm[i] <- r5(p.adjust(R3$p[i], method = "holm"))
+  R3$p_BH[i] <- r5(p.adjust(R3$p[i], method = "BH"))
 }
 R3$结论 <- ifelse(R3$p_Holm < 0.05, "校正后仍显著", "校正后不显著")
 
 COEF$p_Holm <- NA_real_; COEF$p_BH <- NA_real_
 for (s in unique(COEF$说法号)) {
   i <- which(COEF$说法号 == s)
-  COEF$p_Holm[i] <- p.adjust(COEF$p[i], method = "holm")
-  COEF$p_BH[i] <- p.adjust(COEF$p[i], method = "BH")
+  COEF$p_Holm[i] <- r5(p.adjust(COEF$p[i], method = "holm"))
+  COEF$p_BH[i] <- r5(p.adjust(COEF$p[i], method = "BH"))
 }
 COEF$校正后显著 <- ifelse(COEF$p_Holm < 0.05, "是", "否")
 cat("八次模型比较里，游戏 对 国别 这一行校正后仍显著的：",
@@ -335,18 +337,19 @@ cat("固定效应表共", nrow(COEF), "行；校正后仍显著的", sum(COEF$�
 ```
 
 ```{r descriptive}
-# 描述与配对。这一块不建模，出的是「并排比」与「配对比」的对照、八条说法在游戏内部
-# 彼此的相关、以及人均勾了几条。它支撑的结论是：并排看出来的差距有多大一部分是
-# 「谁在评这个游戏」，而不是游戏本身的形象差。
+# 描述与配对。这一块不建模，也不含协变量，所以用全样本 DA（1068 条人-游戏记录），
+# 与 092601_analysis.py 的配对数字同一批人；第一到第五节的六个模型用分析样本 D（1052 条）。
+# 它出的是「并排比」与「配对比」的对照、八条说法在游戏内部彼此的相关、以及人均勾了几条，
+# 支撑的结论是：并排看出来的差距有多大一部分是「谁在评这个游戏」，而不是游戏本身的形象差。
 # 游戏内的两两 phi、人均勾选条数、一条不勾的比例
 rows <- NULL
 for (g in 1:17) {
-  dg <- D[D$gidx == g & D$claim == 1, ]
+  dg <- DA[DA$gidx == g & DA$claim == 1, ]
   ng <- nrow(dg)
   pg <- paste(dg$pid)
   base <- dg
   W <- sapply(1:8, function(s) {
-    dd <- D[D$gidx == g & D$claim == s, ]
+    dd <- DA[DA$gidx == g & DA$claim == s, ]
     dd$y[match(pg, paste(dd$pid))]
   })
   mn <- mean(rowSums(W)); zero <- mean(rowSums(W) == 0)
@@ -361,7 +364,7 @@ PAIRN <- 20
 prs <- combn(GAME_SHORT, 2, simplify = FALSE)
 pairstat <- NULL
 for (s in 1:8) {
-  dd <- D[D$claim == s, ]
+  dd <- DA[DA$claim == s, ]
   W <- tapply(dd$y, list(as.character(dd$pid), as.character(dd$game)), function(v) v[1])
   W <- W[, GAME_SHORT, drop = FALSE]
   rate <- colMeans(W, na.rm = TRUE)
@@ -389,17 +392,18 @@ for (s in 1:8) {
     配对N20以上 = npair, 其中N40以上 = n40,
     配对显著次数 = nsig, stringsAsFactors = FALSE))
 }
-# 每条「受访者 × 游戏」记录上勾了几条说法：平台强制至少勾一条，所以没有一条都没勾的记录
-CELL <- aggregate(y ~ pid + gidx, data = D, FUN = sum)
+# 每条「受访者 × 游戏」记录上勾了几条说法（全样本）：平台强制至少勾一条，所以没有一条都没勾的记录
+CELL <- aggregate(y ~ pid + gidx, data = DA, FUN = sum)
 cellinfo <- data.frame(
   项目 = c("人-游戏记录数", "每条记录勾选的条数：最少", "最多", "平均",
            "只勾 1 条的记录数", "只勾 1 条的记录占多少", "一条都没勾的记录数",
            "受访者平均评几个游戏", "受访者一共几位"),
   值 = c(nrow(CELL), min(CELL$y), max(CELL$y), sprintf("%.2f", mean(CELL$y)),
           sum(CELL$y == 1), sprintf("%.1f%%", mean(CELL$y == 1) * 100),
-          sum(CELL$y == 0), sprintf("%.2f", nrow(CELL) / nlevels(D$pid)),
-          nlevels(D$pid)))
-# 平台强制至少勾一条，对每一条说法的事件数有什么影响：只勾 1 条的那些记录贡献了多少事件
+          sum(CELL$y == 0), sprintf("%.2f", nrow(CELL) / nlevels(DA$pid)),
+          nlevels(DA$pid)))
+# 平台强制至少勾一条，对每一条说法的事件数有什么影响。这一张跟诊断表同口径，
+# 用分析样本 D，因为要说的是「模型里那些事件有多少来自只勾一条的记录」。
 onekey <- paste(CELL$pid[CELL$y == 1], CELL$gidx[CELL$y == 1])
 D$key <- paste(D$pid, D$gidx)
 forced <- data.frame(
@@ -539,6 +543,9 @@ RD <- c(
   "",
   "## 六　描述与配对",
   "",
+  "这一节的并排、配对、phi、人均勾选都用全样本 1068 条人-游戏记录（这一节不含协变量，",
+  "没有剔行的理由），与 092601_analysis.py 的配对数字出自同一批人。",
+  "",
   mdtab(pairstat),
   "",
   mdtab(rows),
@@ -603,6 +610,7 @@ LG <- c(
   sprintf("  每参数事件数低于 10 的行：%d 行", sum(DIAG$每参数多少个事件 < 10)),
   sprintf("  最大 GVIF 的最高值：%s",
           max(as.numeric(DIAG$最大GVIF[DIAG$最大GVIF != "—"]), na.rm = TRUE)),
+  sprintf("  描述与配对用全样本（1068 条记录、293 位受访者），因为它不含协变量，没有剔行的理由。"),
   sprintf("  只勾 1 条的人-游戏记录占 %s，一条都没勾的记录 %d 条（平台强制至少勾一条）",
           cellinfo$值[cellinfo$项目 == "只勾 1 条的记录占多少"],
           as.integer(cellinfo$值[cellinfo$项目 == "一条都没勾的记录数"])),
@@ -610,12 +618,19 @@ LG <- c(
   "五、自检",
   paste0("  ", CHK))
 if (!CHECK) {
-  for (f in list(c("回归结果.md", RD), c("回归日志.txt", LG))) {
+  # 注意：这里必须用 list(...) 装「文件名 ＋ 行向量」。写成 c(...) 会把行向量摊平，
+  # f[[2]] 只拿到第一行，产物就只剩一个标题。
+  for (f in list(list("回归结果.md", RD), list("回归日志.txt", LG))) {
     writeLines(f[[2]], con <- file(file.path(OUT, f[[1]]), open = "w", encoding = "UTF-8"),
                useBytes = TRUE)
     close(con)
+    cat("写了", f[[1]], "（", length(f[[2]]), "行）\n")
   }
-  cat("写了 回归结果.md 与 回归日志.txt\n")
+  # 落盘之后再数一遍行数：产物只剩标题这一类的错不会报错，只会静静地少写
+  n_md <- length(readLines(file.path(OUT, "回归结果.md"), encoding = "UTF-8", warn = FALSE))
+  n_lg <- length(readLines(file.path(OUT, "回归日志.txt"), encoding = "UTF-8", warn = FALSE))
+  cat(sprintf("盘上实测：回归结果.md %d 行，回归日志.txt %d 行\n", n_md, n_lg))
+  stopifnot(n_md >= length(RD), n_lg >= 20)
 } else {
   cat("--check：不重写 回归结果.md 与 回归日志.txt\n")
 }
