@@ -20,15 +20,20 @@ R 里只做模型与表格，第三支脚本才能与前面两支对上账。
   ｜   nowp   现在还在玩这个游戏（0／1），来自 Q4 的同序项
   ｜   nrat   这位受访者一共评了几个游戏
   ｜   age／sex／social／budget  受访者属性，见下；缺失写 −1，R 侧转回 NA
+  ｜   q18_1–q18_9  Q18 的九个选项，一人一套取值（同一个人在他的每条人-游戏记录上相同）；
+  ｜                1＝勾了、0＝没勾、−1＝缺失。按勾了的都算 1，不截取。
 
 受访者属性的出处：age 取面板配额 S5（1＝18–29、2＝30–49、3＝50–60），
 sex 取 S4（0＝男性、1＝女性），social 取 Q23（1 主动、2 被动、3 独狼、4 视情况），
 budget 取 Q37（1 几乎没有 ～ 7 十万円以上）。四者都按「谁在答」这一层解释，
 不含任何游戏侧信息。
 
+Q18 的出处是 `IDP46__1–__9`，门槛与 Q22 相同（`play_mmorpg=1`）。Q17 本轮缺席：
+投放配置失误，`IDP45` 与 `IDP45_IDPA413` 全列 99，不在本脚本的处理范围内。
+
 输入  Datasets/RPG.csv        579 行，由 092601_cleaning.py 产出
 输出  <输出目录>/q22_long_ascii.csv   8544 行，全 ASCII 数字码，给 R 读
-      <输出目录>/q22_labels.csv       游戏、国别、说法的中文与日文对照
+      <输出目录>/q22_labels.csv       游戏、国别、说法、Q18 选项与对位关系的中日文对照
       <输出目录>/regression_prep_log.txt
 
 用法  python 092601_regression_prep.py RPG.csv 输出目录
@@ -81,8 +86,33 @@ CLAIMS = [
     ("课金友善", "課金システムがプレイヤーに対して親切である"),
     ("社区热闹", "コミュニティが盛り上がっており、ネット上での議論や話題が多い"),
 ]
+# Q18 的九个选项（IDP46__1–__9），顺序即问卷选项顺序
+Q18_ITEMS = [
+    ("探索大世界", "オープンワールドの探索"),
+    ("角色养成与职业构筑", "キャラクターの育成やビルド"),
+    ("大规模公会对抗", "大規模なギルド対戦（攻城戦、拠点戦など）"),
+    ("组队打副本", "他人と協力して高難易度ダンジョン（コンテンツ）を攻略する"),
+    ("收集与生活玩法", "アイテム収集や生活系コンテンツ（採掘、製作など）"),
+    ("剧情与世界观", "ストーリーや世界観"),
+    ("画面表现与音乐", "グラフィックや音楽"),
+    ("自由的交易与经济", "自由度の高いトレードや金策システム"),
+    ("其他", "その他（具体的にご記入ください）"),
+]
+# 说法 → Q18 对位项（null 表示这条说法不加偏好变量）。第二列是对位类型，写进标签表，
+# R 侧据此把偏好项分成「完全对位」与「部分对位」两组，不出现硬编码的中文。
+PREF_MAP = {
+    1: (7, "完全对位"),      # 画面音乐 ← 画面表现与音乐
+    2: (None, ""),           # 战斗手感：Q18 无对位项
+    3: (2, "部分对位"),      # 系统深度 ← 角色养成与职业构筑
+    4: (6, "完全对位"),      # 故事世界观 ← 剧情与世界观
+    5: (None, ""),           # 角色设计：Q18 无对位项
+    6: (None, ""),           # 找得到队友：Q18 无对位项
+    7: (8, "部分对位"),      # 课金友善 ← 自由的交易与经济
+    8: (None, ""),           # 社区热闹：Q18 无对位项
+}
 HEAD = ["pid", "gidx", "claim", "y", "ctry", "isro", "nowp", "nrat",
-        "age", "sex", "social", "budget", "play", "notplay"]
+        "age", "sex", "social", "budget", "play", "notplay"] + \
+       ["q18_%d" % i for i in range(1, 10)]
 LOG = []
 
 
@@ -135,6 +165,10 @@ def build():
     def code(v):
         return -1 if v is None else v
 
+    # Q18 的九个选项。一人一套取值，在他的每条人-游戏记录上重复。
+    q18 = [[code(num("IDP46__%d" % i, k)) for k in range(n)] for i in range(1, 10)]
+    q18_sel = [sum(1 for i in range(9) if q18[i][k] == 1) for k in range(n)]
+
     out = [HEAD]
     n_miss = 0
     for g in range(1, 18):
@@ -152,7 +186,8 @@ def build():
                             now_of[g][k] if now_of[g][k] is not None else 0,
                             nrat[k], code(num("QUOTAGERANGE", k)),
                             code(num("GENDER_NonBinary", k)), code(num("IDP55", k)),
-                            code(num("IDP69", k)), play[k], notplay[k]])
+                            code(num("IDP69", k)), play[k], notplay[k]] +
+                           [q18[i][k] for i in range(9)])
 
     section("二、长表规模")
     per_claim = [sum(1 for r in out[1:] if r[2] == s) for s in range(1, 9)]
@@ -179,6 +214,36 @@ def build():
                 ctl[r[idx]] = ctl.get(r[idx], 0) + 1
         say("  %-7s 取值 %s" % (name, ", ".join("%d(%d 人-游戏)" % (v, ctl[v]) for v in vals)))
 
+    section("五、Q18 的九个选项")
+    # 样本一致性：Q18 的作答人、Q22 的出题人、play_mmorpg=1 的人必须是同一批，
+    # 否则从步骤 0 到步骤 4 的模型要跟着缩小到同一批行上重跑。
+    ans = set(k for k in range(n) if q18_sel[k] > 0)
+    raw = set(k for k in range(n) if all(q18[i][k] == -1 for i in range(9)))
+    assert ans == set(rated), "Q18 的作答人与 Q22 的出题人不是同一批：差集 %s" % sorted(ans ^ set(rated))
+    assert all(play[k] == 1 for k in ans), "在 Q18 里作答的人必须都 play_mmorpg=1"
+    assert not (raw & set(rated)), "出过 Q22 的人在 Q18 上不该整题缺答"
+    say("  作答 %d 人，与 Q22 出题人、play_mmorpg=1 的人完全同一批" % len(ans))
+    say("  整题缺答（九列全 99）的 %d 人，全部落在门槛之外" % len(raw))
+    over = [k for k in ans if q18_sel[k] > 3]
+    say("  逐项勾选率（分母 %d 人）：" % len(ans))
+    for i in range(1, 10):
+        c = sum(1 for k in ans if q18[i - 1][k] == 1)
+        say("    %-12s 勾了 %3d 人（%.1f%%）" % (Q18_ITEMS[i - 1][0], c, 100.0 * c / len(ans)))
+    dist = {}
+    for k in ans:
+        dist[q18_sel[k]] = dist.get(q18_sel[k], 0) + 1
+    say("  每人勾了几项：%s" % "　".join("%d 项×%d 人" % (v, dist[v]) for v in sorted(dist)))
+    say("  题面写「最多 3 项」，实勾 4 项以上的 %d 人（%.1f%%），最多 %d 项"
+        % (len(over), 100.0 * len(over) / len(ans), max(q18_sel[k] for k in ans)))
+    say("  不做截取：勾了的都算 1。截取要自己决定砍哪几项，是补平台没做的事。")
+
+    section("六、说法与 Q18 的对位")
+    for s in range(1, 9):
+        i, tag = PREF_MAP[s]
+        say("  %-6s ← %s" % (CLAIMS[s - 1][0],
+                            "不接（Q18 无对位项）" if i is None
+                            else "Q18-%d %s（%s）" % (i, Q18_ITEMS[i - 1][0], tag)))
+
     labels = [["type", "key", "short", "cn", "jp_or_cn"]]
     for i, (short, cn, jp, ctry) in enumerate(GAMES, start=1):
         labels.append(["game", i, short, cn, jp])
@@ -188,6 +253,11 @@ def build():
         labels.append(["ctry", k, str(k), CTRY_CN[k], ""])
     for k, lab in ((0, "已不在玩"), (1, "现在还在玩")):
         labels.append(["nowp", k, str(k), lab, ""])
+    for i, (cn, jp) in enumerate(Q18_ITEMS, start=1):
+        labels.append(["q18", i, "Q18_%d" % i, cn, jp])
+    for s in range(1, 9):
+        i, tag = PREF_MAP[s]
+        labels.append(["pref", s, "" if i is None else str(i), tag, ""])
     labels.append(["cov", "age", "age", "面板年龄档（1=18–29、2=30–49、3=50–60）", "S5"])
     labels.append(["cov", "sex", "sex", "性别（0=男性、1=女性，缺失=98/99）", "S4"])
     labels.append(["cov", "social", "social", "社交方式（1=主动、2=被动、3=独狼、4=视情况）", "Q23"])
@@ -223,7 +293,7 @@ def main():
     out, labels = build()
     long_text, label_text = dump(out), dump(labels)
 
-    section("五、落盘")
+    section("七、落盘")
     ok = True
     if CHECK_ONLY:
         say("  --check：只比对，不写盘")
