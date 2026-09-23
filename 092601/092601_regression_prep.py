@@ -23,7 +23,7 @@ R 里只做模型与表格，第三支脚本才能与前面两支对上账。
   ｜   q18_1–q18_9  Q18 的九个选项，一人一套取值（同一个人在他的每条人-游戏记录上相同）；
   ｜                1＝勾了、0＝没勾、−1＝缺失。按勾了的都算 1，不截取。
 
-受访者属性的出处：age 取面板配额 S5（1＝18–29、2＝30–49、3＝50–60），
+受访者属性的出处：age 取合并清洗文件里的 age_group（1＝18–29、2＝30–39、3＝40–49、4＝50–60），它与按 resp_age 现切的档位逐人一致，脚本里当场重切核对；
 sex 取 S4（0＝男性、1＝女性），social 取 Q23（1 主动、2 被动、3 独狼、4 视情况），
 budget 取 Q37（1 几乎没有 ～ 7 十万円以上）。四者都按「谁在答」这一层解释，
 不含任何游戏侧信息。
@@ -31,13 +31,13 @@ budget 取 Q37（1 几乎没有 ～ 7 十万円以上）。四者都按「谁在
 Q18 的出处是 `IDP46__1–__9`，门槛与 Q22 相同（`play_mmorpg=1`）。Q17 本轮缺席：
 投放配置失误，`IDP45` 与 `IDP45_IDPA413` 全列 99，不在本脚本的处理范围内。
 
-输入  Datasets/RPG.csv        579 行，由 092601_cleaning.py 产出
+输入  Datasets/JP_RPG.csv     724 行（两批合并），本脚本只取 is_batch2=0 的 579 行
 输出  <输出目录>/q22_long_ascii.csv   8544 行，全 ASCII 数字码，给 R 读
       <输出目录>/q22_labels.csv       游戏、国别、说法、Q18 选项与对位关系的中日文对照
       <输出目录>/regression_prep_log.txt
 
-用法  python 092601_regression_prep.py RPG.csv 输出目录
-      python 092601_regression_prep.py RPG.csv 输出目录 --check   只重算比对，不写盘
+用法  python 092601_regression_prep.py JP_RPG.csv 输出目录
+      python 092601_regression_prep.py JP_RPG.csv 输出目录 --check   只重算比对，不写盘
 """
 import csv
 import io
@@ -47,7 +47,7 @@ import sys
 CHECK_ONLY = "--check" in sys.argv
 ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = ARGS[0] if ARGS else os.path.join(HERE, "data", "RPG.csv")
+SRC = ARGS[0] if ARGS else os.path.join(HERE, "data", "JP_RPG.csv")
 OUTDIR = ARGS[1] if len(ARGS) > 1 else os.path.dirname(os.path.abspath(SRC))
 LONG_OUT = os.path.join(OUTDIR, "q22_long_ascii.csv")
 LABEL_OUT = os.path.join(OUTDIR, "q22_labels.csv")
@@ -131,11 +131,16 @@ def build():
     with io.open(SRC, "r", encoding="utf-8-sig", newline="") as f:
         rows = list(csv.reader(f))
     COL = {h: j for j, h in enumerate(rows[0])}
-    D = rows[1:]
+    assert all(h in COL for h in ("is_batch2", "age_group", "resp_age")), \
+        "合并清洗文件缺 is_batch2／age_group／resp_age 之一"
+    D_all = rows[1:]
+    assert len(D_all) == 724, "合并文件应为 724 行，实测 %d" % len(D_all)
+    D = [r for r in D_all if r[COL["is_batch2"]] == "0"]
     n = len(D)
-    assert n == 579, "应为 579 行，实测 %d" % n
+    assert n == 579, "主样本应为 579 行，实测 %d" % n
     section("一、读入与自检")
-    say("  %s：%d 行 × %d 列" % (os.path.basename(SRC), n, len(rows[0])))
+    say("  %s：%d 行 × %d 列；只取 is_batch2=0 的 %d 行（补充样本 %d 行不取）"
+        % (os.path.basename(SRC), len(D_all), len(rows[0]), n, len(D_all) - n))
 
     def num(h, k):
         v = D[k][COL[h]]
@@ -162,6 +167,23 @@ def build():
         min(sum(1 for k in range(n) if row_of[g][k] == 1) for g in range(1, 18)),
         max(sum(1 for k in range(n) if row_of[g][k] == 1) for g in range(1, 18))))
 
+    # 年龄档：四档切点 29／39／49，取合并清洗文件里的 age_group。
+    # 这里当场按 resp_age 重切一遍、与 age_group 逐人比，两批同口径这件事要在脚本里被验证，
+    # 而不是靠外部口径说明。四档人数 78／176／288／37 一并钉住。
+    ages = [num("resp_age", k) for k in range(n)]
+    miss_age = [pid[k] for k in range(n) if ages[k] is None]
+    assert not miss_age, "主样本有 %d 人缺 resp_age：%s" % (len(miss_age), miss_age[:5])
+    bands = [1 if a <= 29 else 2 if a <= 39 else 3 if a <= 49 else 4 for a in ages]
+    grp = [num("age_group", k) for k in range(n)]
+    bad = [(pid[k], ages[k], grp[k], bands[k]) for k in range(n) if grp[k] != bands[k]]
+    assert not bad, "age_group 与按 resp_age 现切的四档不一致：%s" % bad[:5]
+    cnt = dict((b, bands.count(b)) for b in (1, 2, 3, 4))
+    assert [cnt[b] for b in (1, 2, 3, 4)] == [78, 176, 288, 37], \
+        "四档人数应为 78／176／288／37，实测 %s" % [cnt[b] for b in (1, 2, 3, 4)]
+    say("  年龄档：age_group 四档（1＝18–29、2＝30–39、3＝40–49、4＝50–60），"
+        "与按 resp_age 现切的档位逐人一致；四档 %s 人"
+        % "／".join("%d" % cnt[b] for b in (1, 2, 3, 4)))
+
     def code(v):
         return -1 if v is None else v
 
@@ -184,7 +206,7 @@ def build():
                 out.append([pid[k], g, s, v, GAMES[g - 1][3],
                             1 if g in (14, 15, 16, 17) else 0,
                             now_of[g][k] if now_of[g][k] is not None else 0,
-                            nrat[k], code(num("QUOTAGERANGE", k)),
+                            nrat[k], code(num("age_group", k)),
                             code(num("GENDER_NonBinary", k)), code(num("IDP55", k)),
                             code(num("IDP69", k)), play[k], notplay[k]] +
                            [q18[i][k] for i in range(9)])
@@ -258,7 +280,7 @@ def build():
     for s in range(1, 9):
         i, tag = PREF_MAP[s]
         labels.append(["pref", s, "" if i is None else str(i), tag, ""])
-    labels.append(["cov", "age", "age", "面板年龄档（1=18–29、2=30–49、3=50–60）", "S5"])
+    labels.append(["cov", "age", "age", "年龄档四档：1＝18–29、2＝30–39、3＝40–49、4＝50–60", "resp_age"])
     labels.append(["cov", "sex", "sex", "性别（0=男性、1=女性，缺失=98/99）", "S4"])
     labels.append(["cov", "social", "social", "社交方式（1=主动、2=被动、3=独狼、4=视情况）", "Q23"])
     labels.append(["cov", "budget", "budget", "每月娱乐预算（1=几乎没有 ～ 7=十万円以上）", "Q37"])
@@ -312,7 +334,8 @@ def main():
         sys.exit(1)
 
     say("")
-    say("  结论：长表 %d 行、每条说法 1068 条人-游戏记录、17 个游戏、293 位受访者。" % (len(out) - 1))
+    say("  结论：长表 %d 行、每条说法 1068 条人-游戏记录、17 个游戏、293 位受访者；"
+        "年龄档取 age_group 四档。" % (len(out) - 1))
     text = "\n".join(LOG) + "\n"
     if not CHECK_ONLY:
         with io.open(LOG_OUT, "w", encoding="utf-8", newline="") as f:

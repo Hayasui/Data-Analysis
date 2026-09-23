@@ -191,8 +191,8 @@ def build():
                                                 for v in sorted(ctl))))
     say("  age ＝ age_group 的四档（1＝18–29、2＝30–39、3＝40–49、4＝50–60），全员齐。")
     miss = [r for r in out[1:] if r[9] < 0]
-    say("  性别缺答：%d 条记录（%d 位受访者，id %s）"
-        % (len(miss), len({r[0] for r in miss}), sorted({r[0] for r in miss})))
+    say("  性别缺答：%d 条人-游戏记录（长表 %d 行；%d 位受访者，id %s）"
+        % (len(miss) // 8, len(miss), len({r[0] for r in miss}), sorted({r[0] for r in miss})))
 
     labels = [["type", "key", "short", "cn", "jp_or_cn"]]
     for i, (short, cn, jp, ctry) in enumerate(GAMES, start=1):

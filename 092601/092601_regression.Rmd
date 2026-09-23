@@ -205,8 +205,8 @@ fitq <- function(terms, data, re2 = NULL) {
 
 ```{r catalogue}
 # 列出各步骤的模型、固定效应、参照组与固定参数个数。固定参数个数含常数项：
-# 国别 4（1＋3 个对比）、游戏 17（1＋16）、逐步链从 19 加到 31、
-# 全模型（游戏＋六项属性＋一个偏好项）32、加交互 48。
+# 国别 4（1＋3 个对比）、游戏 17（1＋16）、年龄档四档（1＋3 个对比）、
+# 逐步链从 20 加到 32、全模型（游戏＋六项属性＋一个偏好项）33、加交互 49。
 ATTRS <- c("age", "sex", "stillply", "nrat", "social", "budget")
 STEP_CN <- c("年龄档", "性别", "现在还在不在玩", "一共评了几个", "社交方式", "娱乐预算")
 TERMS_CHAIN <- lapply(0:6, function(k) c("game", ATTRS[seq_len(k)]))
@@ -220,7 +220,7 @@ CAT <- data.frame(
               rep(paste0("《", GAME_CN["FFXIV"], "》｜已不在玩｜18–29 岁｜男性｜主动社交｜几乎没有预算"), 6),
               "同上", "同上"),
   随机效应 = c("受访者随机截距", "受访者随机截距＋游戏随机截距", rep("受访者随机截距", 10)),
-  固定参数个数 = c(1, 1, 4, 17, 19, 20, 21, 22, 25, 31, 32, 31),
+  固定参数个数 = c(1, 1, 4, 17, 20, 21, 22, 23, 26, 32, 33, 32),
   stringsAsFactors = FALSE)
 knitr::kable(CAT, row.names = FALSE)
 ```
@@ -229,7 +229,7 @@ knitr::kable(CAT, row.names = FALSE)
 # 协变量的实际取值与人数，用来说明后面哪些档太薄；Q18 逐项勾选率同表摆出。
 cl <- D[D$claim == 1, ]
 cov_tab <- rbind(
-  data.frame(变量 = "面板年龄档 S5", 取值 = names(table(cl$age, useNA = "ifany")),
+  data.frame(变量 = "年龄档（resp_age 四档）", 取值 = names(table(cl$age, useNA = "ifany")),
              人_game记录 = as.integer(table(cl$age, useNA = "ifany"))),
   data.frame(变量 = "性别 S4", 取值 = names(table(cl$sex, useNA = "ifany")),
              人_game记录 = as.integer(table(cl$sex, useNA = "ifany"))),
@@ -734,8 +734,8 @@ add(all(CHAIN$p_Holm[CHAIN$步骤 != "0 空模型"] >=
     "逐步链的校正后 p 不小于未校正 p（Holm 只会放大）")
 add(nPref == 0 || all(PREF$校正后显著 %in% c("是", "否")), "偏好项表有校正后显著的标记")
 add(all(!is.na(CHAIN$边际R2[CHAIN$步骤 != "0 空模型"])), "逐步链每一步的边际 R² 都在")
-add(all(CHAIN$固定参数数[CHAIN$步骤 == "4.6"] == 31), "逐步链末步的固定参数数是 31")
-add(all(OPT$固定参数数 <= 32), "最优模型的固定参数数不超过 32")
+add(all(CHAIN$固定参数数[CHAIN$步骤 == "4.6"] == 32), "逐步链末步的固定参数数是 32")
+add(all(OPT$固定参数数 <= 33), "最优模型的固定参数数不超过 33")
 add(all(OPTF$块 %in% c("游戏", "偏好项", "受访者属性")), "最优模型固定效应的块名合法")
 add(all(!is.na(COEF$p_Holm[COEF$块 == "游戏"])), "全模型的游戏对比都有校正后 p")
 add(all(abs(COEF$p_Holm[COEF$块 == "偏好项"] - COEF$p[COEF$块 == "偏好项"]) < 1e-9),
